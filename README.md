@@ -189,10 +189,10 @@ generate_pymol_report()
 """
 report = Report(log_file, traj_file, top_file, cosolvents_file)
 report.generate_report(out_path=out_path)
-report.generate_density_maps(out_path=out_path, , analysis_selection_string="")
+report.generate_density_maps(out_path=out_path, analysis_selection_string="")
 report.generate_pymol_reports(report.topology, 
                               report.trajectory, 
-                              density_file="/path/to/density/file", 
+                              density_files="/path/to/density/file", 
                               selection_string='', 
                               out_path=out_path)
 ```
