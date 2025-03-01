@@ -9,7 +9,7 @@
   "variants_d": {},
   "repulsive_residues": [],
   "repulsive_epsilon": 0.01,
-  "repulsive_sigma": 10.0,
+  "repulsive_sigma": 4.0,
   "solvent_smiles": "H2O",
   "solvent_copies": null,
   "membrane": false,

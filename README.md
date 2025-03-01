@@ -74,8 +74,8 @@ The main entry point of the script is the file `config.json` where all the neces
 |variants                 | dictionary | Dictionary of residues for which a variant is requested (different protonation state) in the form {"chain_id:res_id":"protonation_state"}, `None` for the rest of the residues. | empty dictionary | |
 |add_repulsive            | boolean | Flag indicating if adding repulsive forces between certain residues or not. | FALSE | ✅ | ❌ | ❌ | ❌ |
 |repulsive_resiudes       | list | List of residues for which applying the repulsive forces. | empty list | ✅ | ❌ | ❌ | ❌ |
-|epsilon                  | float | Depth of the potential well in kcal/mol | 0.01 kcal/mol | ✅ | ❌ | ❌ | ❌ |
-|sigma                    | float | inter-particle distance in Angstrom | 10.0 Angstrom | ✅ | ❌ | ❌ | ❌ |
+|repulsive_epsilon        | float | Depth of the potential well in kcal/mol | 0.01 kcal/mol | ✅ | ❌ | ❌ | ❌ |
+|repulsive_sigma          | float | Inter-particle distance in Angstrom | 4.0 Angstrom | ✅ | ❌ | ❌ | ❌ |
 |solvent_smiles           | string | Smiles string of the solvent to use. | H2O | |
 |solvent_copies           | integer | If specified, the box won't be filled up with solvent, but will have the exact number of solvent molecules specified. | no default | |
 |membrane                 | boolean | Flag indicating if the system has membranes or not. | FALSE | |
@@ -84,7 +84,7 @@ The main entry point of the script is the file `config.json` where all the neces
 |cosolvent_placement      | integer | Integer deciding on which side of the membrane to place the cosolvents. Available options: [0 -> no preference, 1 -> outside, -1 -> inside] | 0 | |
 |waters_to_keep           | list | List of indices of waters of interest in a membrane system. | no default | |
 |radius                   | float | If no receptor, the radius is necessary to set the size of the simulation box. | no default | |
-|output                   | string | Path to where save the results. | no default | |
+|output_dir               | string | Path to where save the results. | no default | |
 |run_cosolvent_system     | boolean | Flag indicating if running creating the system or not. | TRUE | |
 |run_md                   | boolean | Flag indicating if running the md simulation after creating the system or not. | FALSE | ✅ | ❌ | ❌ | ❌ |
 
