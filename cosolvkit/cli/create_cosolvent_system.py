@@ -99,10 +99,10 @@ def main():
 
         protein_modeller = Modeller(protein_topology, protein_positions)
 
-        # Check for repulsive forces consistency beforehand        
-        if config.add_repulsive and len(config.repulsive_residues) < 1:
-            raise Exception("At least one residue name must be specified if custom repulsive forces are requested!")
-        
+        # Check repulsive forces and md engine consistency        
+        if (config.md_format.upper() != "OPENMM") and len(config.repulsive_residues) > 0:
+            raise Warning("Custom repulsive forces will only work if the MD engine is OpenMM!")
+      
         # Load cosolvents and forcefields dictionaries
         with open(config.cosolvents) as fi:
             cosolvents = json.load(fi)
@@ -132,8 +132,8 @@ def main():
                                 n_solvent_molecules=config.solvent_copies,
                                 iteratively_adjust_copies=args.iteratively_adjust_copies)
             
-        if config.add_repulsive:
-            cosolv_system.add_repulsive_forces(config.repulsive_residues, epsilon=config.epsilon, sigma=config.sigma)
+        if len(config.repulsive_residues) > 0:
+            cosolv_system.add_repulsive_forces(config.repulsive_residues, epsilon=config.repulsive_epsilon, sigma=config.repulsive_sigma)
 
         print("Saving topology file")
         cosolv_system.save_topology(topology=cosolv_system.modeller.topology, 

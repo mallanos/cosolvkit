@@ -17,10 +17,9 @@ class Config(object):
                  clean_protein=True,
                  keep_heterogens=False,
                  variants_d=dict(),
-                 add_repulsive=False,
                  repulsive_residues=list(),
-                 epsilon=None,
-                 sigma=None,
+                 repulsive_epsilon=None,
+                 repulsive_sigma=None,
                  solvent_smiles=None,
                  solvent_copies=None,
                  membrane=False,
@@ -41,10 +40,9 @@ class Config(object):
         self.clean_protein = clean_protein
         self.keep_heterogens = keep_heterogens
         self.variants_d = variants_d
-        self.add_repulsive = add_repulsive
         self.repulsive_residues = repulsive_residues
-        self.epsilon = epsilon
-        self.sigma = sigma
+        self.repulsive_epsilon = repulsive_epsilon
+        self.repulsive_sigma = repulsive_sigma
         self.solvent_smiles = solvent_smiles
         self.solvent_copies = solvent_copies
         self.membrane = membrane
@@ -97,6 +95,5 @@ class Config(object):
     def check_validity(self):
         if self.run_md:
             assert self.md_format == "OPENMM", f"{self.md_format} is not supported with the parameter run_md set to {self.run_md}. Only OPENMM is available with this option."
-        if self.add_repulsive:
-            assert self.md_format == "OPENMM", f"{self.md_format} is not supported with the parameter add_repulsive set to {self.run_md}. Only OPENMM is available with this option."
         return
+    
