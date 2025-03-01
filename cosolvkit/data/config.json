@@ -18,7 +18,7 @@
   "cosolvent_placement": 0,
   "waters_to_keep": [],
   "radius": null,
-  "output": "results",
+  "output_dir": "results",
   "run_cosolvent_system": true,
   "run_md": true
 }

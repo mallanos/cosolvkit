@@ -28,7 +28,7 @@ class Config(object):
                  cosolvent_placement=0,
                  waters_to_keep=list(),
                  radius=None,
-                 output=None,
+                 output_dir=None,
                  run_cosolvent_system=True,
                  run_md=False):
         
@@ -51,7 +51,7 @@ class Config(object):
         self.cosolvent_placement = cosolvent_placement
         self.waters_to_keep = waters_to_keep
         self.radius = radius
-        self.output = output
+        self.output_dir = output_dir
         self.run_cosovlent_system = run_cosolvent_system
         self.run_md = run_md
         self.check_validity()

@@ -45,7 +45,7 @@ def main():
     config_file = args.config
     config = Config.from_config(config_file)
     # Start setting up the pipeline
-    os.makedirs(config.output, exist_ok=True)
+    os.makedirs(config.output_dir, exist_ok=True)
     
     if config.run_cosovlent_system:
         if (config.receptor and config.radius is not None) or (not config.receptor and config.radius is None):
@@ -141,15 +141,15 @@ def main():
                                     system=cosolv_system.system,
                                     simulation_format=config.md_format,
                                     forcefield=cosolv_system.forcefield,
-                                    out_path=config.output)
+                                    out_path=config.output_dir)
     
     if config.run_md:
         print("Running MD simulation")
         start = time.time()
         md_format = config.md_format.upper()
         if md_format != "OPENMM":
-            topo = os.path.join(config.output, f"system{MD_FORMAT_EXTENSIONS[md_format]['topology']}")
-            pos = os.path.join(config.output, f"system{MD_FORMAT_EXTENSIONS[md_format]['position']}")
+            topo = os.path.join(config.output_dir, f"system{MD_FORMAT_EXTENSIONS[md_format]['topology']}")
+            pos = os.path.join(config.output_dir, f"system{MD_FORMAT_EXTENSIONS[md_format]['position']}")
             # This is for openmm
             pdb = None
             system = None
@@ -157,8 +157,8 @@ def main():
             topo = None
             pos = None
             # This is for openmm
-            pdb = os.path.join(config.output, "system.pdb")
-            system = os.path.join(config.output, "system.xml")
+            pdb = os.path.join(config.output_dir, "system.pdb")
+            system = os.path.join(config.output_dir, "system.xml")
         
         if md_format == "OPENMM":
             print(f"Starting MD simulation from the files: {pdb}, {system}")
@@ -176,7 +176,7 @@ def main():
                         time_step = args.time_step,
                         warming_steps = 100000,
                         simulation_steps = args.num_simulation_steps, 
-                        results_path = config.output, # This should be the name of system being simulated
+                        results_path = config.output_dir, # This should be the name of system being simulated
                         seed=None
         )
         print(f"Simulation finished after {(time.time() - start)/60:.2f} min.")
