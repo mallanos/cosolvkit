@@ -6,7 +6,7 @@
   "protein_path": "example/protein.pdb",
   "clean_protein": true,
   "keep_heterogens": false,
-  "variants_d": {},
+  "variants": {},
   "repulsive_residues": [],
   "repulsive_epsilon": 0.01,
   "repulsive_sigma": 4.0,

@@ -75,8 +75,8 @@ def main():
                 protein_topology, protein_positions = pdb.topology, pdb.positions
             
             # Call add_variants fucntion
-            if len(config.variants_d.keys()) > 0:
-                variants = list()
+            if len(config.variants.keys()) > 0:
+                variants_list = list()
                 residues = list(protein_topology.residues())
                 mapping = defaultdict(list)
                 for r in residues:
@@ -85,11 +85,11 @@ def main():
                 for chain in mapping:
                     for res_number in mapping[chain]:
                         key = f"{chain}:{res_number}"
-                        if key in config.variants_d:
-                            variants.append(config.variants_d[key])
+                        if key in config.variants:
+                            variants_list.append(config.variants[key])
                         else:
-                            variants.append(None)
-                protein_topology, protein_positions = add_variants(protein_topology, protein_positions, variants)
+                            variants_list.append(None)
+                protein_topology, protein_positions = add_variants(protein_topology, protein_positions, variants_list)
                 
         else:
             assert config.radius is not None, "radius is None in the config"

@@ -16,7 +16,7 @@ class Config(object):
                  protein_path=None,
                  clean_protein=True,
                  keep_heterogens=False,
-                 variants_d=dict(),
+                 variants=dict(),
                  repulsive_residues=list(),
                  repulsive_epsilon=None,
                  repulsive_sigma=None,
@@ -39,7 +39,7 @@ class Config(object):
         self.protein_path = protein_path
         self.clean_protein = clean_protein
         self.keep_heterogens = keep_heterogens
-        self.variants_d = variants_d
+        self.variants = variants
         self.repulsive_residues = repulsive_residues
         self.repulsive_epsilon = repulsive_epsilon
         self.repulsive_sigma = repulsive_sigma
