@@ -46,51 +46,54 @@ def main():
     config = Config.from_config(config_file)
     # Start setting up the pipeline
     os.makedirs(config.output_dir, exist_ok=True)
-    
+
+    if config.protein_path is not None:
+        print(f"Loading receptor file {config.protein_path}")
+        try:
+            with open(config.protein_path) as f:
+                pdb_string = io.StringIO(f.read())
+        except FileNotFoundError:
+            raise SystemExit(f"Error! File {config.protein_path} not found.")
+
     if config.run_cosovlent_system:
-        if (config.receptor and config.radius is not None) or (not config.receptor and config.radius is None):
+        if (config.protein_path is not None and config.radius is not None) or (config.protein_path is None and config.radius is None):
             raise SystemExit("Error! If the config file specifies a receptor, the radius should be set to null and vice versa.")
         
-        # Check if need to clean the protein and add variants of reisudes
-        if config.receptor:
-            print("Protein present")
-            with open(config.protein_path) as f:
-                pdb_string = f.read()
-            pdb_string = io.StringIO(pdb_string)
-            if config.clean_protein:
-                pdbfile = None
-                pdbxfile = None
-                if config.protein_path.endswith(".pdb"):
-                    pdbfile = pdb_string
-                else:
-                    pdbxfile = pdb_string
-                protein_topology, protein_positions = fix_pdb(pdbfile=pdbfile,
-                                                            pdbxfile=pdbxfile, 
-                                                            keep_heterogens=config.keep_heterogens, )
+        # Check if we need to clean the protein and add variants of residues
+        if config.clean_protein:
+            pdbfile = None
+            pdbxfile = None
+            if config.protein_path.endswith(".pdb"):
+                pdbfile = pdb_string
             else:
-                if not config.protein_path.endswith(".pdb"):
-                    pdb = PDBxFile(pdb_string)
-                else:
-                    pdb = PDBFile(pdb_string)
-                protein_topology, protein_positions = pdb.topology, pdb.positions
+                pdbxfile = pdb_string
+            protein_topology, protein_positions = fix_pdb(pdbfile=pdbfile,
+                                                        pdbxfile=pdbxfile, 
+                                                        keep_heterogens=config.keep_heterogens)
+        else:
+            if not config.protein_path.endswith(".pdb"):
+                pdb = PDBxFile(pdb_string)
+            else:
+                pdb = PDBFile(pdb_string)
+            protein_topology, protein_positions = pdb.topology, pdb.positions
             
-            # Call add_variants fucntion
-            if len(config.variants.keys()) > 0:
-                variants_list = list()
-                residues = list(protein_topology.residues())
-                mapping = defaultdict(list)
-                for r in residues:
-                    mapping[r.chain.id].append(int(r.id))
-                
-                for chain in mapping:
-                    for res_number in mapping[chain]:
-                        key = f"{chain}:{res_number}"
-                        if key in config.variants:
-                            variants_list.append(config.variants[key])
-                        else:
-                            variants_list.append(None)
-                protein_topology, protein_positions = add_variants(protein_topology, protein_positions, variants_list)
-                
+        # Call add_variants funtion to assing variants to the protein
+        if len(config.variants.keys()) > 0:
+            variants_list = list()
+            residues = list(protein_topology.residues())
+            mapping = defaultdict(list)
+            for r in residues:
+                mapping[r.chain.id].append(int(r.id))
+            
+            for chain in mapping:
+                for res_number in mapping[chain]:
+                    key = f"{chain}:{res_number}"
+                    if key in config.variants:
+                        variants_list.append(config.variants[key])
+                    else:
+                        variants_list.append(None)
+            protein_topology, protein_positions = add_variants(protein_topology, protein_positions, variants_list)
+            
         else:
             assert config.radius is not None, "radius is None in the config"
             # Create empty modeller since there's nothing in the system yet

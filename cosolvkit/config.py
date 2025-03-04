@@ -12,7 +12,6 @@ class Config(object):
                  cosolvents=None,
                  forcefields=None,
                  md_format=None,
-                 receptor=True,
                  protein_path=None,
                  clean_protein=True,
                  keep_heterogens=False,
@@ -35,7 +34,6 @@ class Config(object):
         self.cosolvents = cosolvents
         self.forcefields = forcefields
         self.md_format = md_format.upper()
-        self.receptor = receptor
         self.protein_path = protein_path
         self.clean_protein = clean_protein
         self.keep_heterogens = keep_heterogens

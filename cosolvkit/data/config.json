@@ -2,7 +2,6 @@
   "cosolvents": "cosolvkit/data/cosolvents.json",
   "forcefields": "cosolvkit/data/forcefields.json",
   "md_format": "openmm",
-  "receptor": true,
   "protein_path": "example/protein.pdb",
   "clean_protein": true,
   "keep_heterogens": false,

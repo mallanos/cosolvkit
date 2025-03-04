@@ -67,7 +67,6 @@ The main entry point of the script is the file `config.json` where all the neces
 |cosolvents               | string |Path to the json file containing the cosolvents to add to the system. | no default | | 
 |forcefields              | string | Path to the json file containing the forcefields to use. | no default | | 
 |md_format                | string | Format to use for the MD simulations and topology files. Supported formats: [OPENMM, AMBER, GROMACS, CHARMM] | no default | |
-|receptor                 | boolean | Boolean describing if the receptor is present or not. | no default | |
 |protein_path             | string | If receptor is `true` this should be the path to the protein structure. | no default | |
 |clean_protein            | boolean | Flag indicating if cleaning the protein with `PDBFixer` | TRUE | |
 |keep_heterogens          | boolean | Flag indicating if keeping the heterogen atoms while cleaning the protein. Waters will be always kept. | FALSE | |
