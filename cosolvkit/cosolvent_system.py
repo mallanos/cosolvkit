@@ -1182,12 +1182,14 @@ class CosolventSystem(object):
             maxRange = Vec3(*(max((pos[i] for pos in positions)) for i in range(3)))
             center = 0.5*(minRange+maxRange)
             radius = max(unit.norm(center-pos) for pos in positions)
+            width = max(2*radius+padding, 2*padding)
         else:
             center = Vec3(0, 0, 0)
             radius = radius.value_in_unit(openmmunit.nanometer)
             maxRange = Vec3(radius, radius, radius)
             minRange = Vec3(-radius, -radius, -radius)
-        width = max(2*radius+padding, 2*padding)
+            width = radius
+
         vectors = (Vec3(width, 0, 0), Vec3(0, width, 0), Vec3(0, 0, width))
         box = Vec3(vectors[0][0], vectors[1][1], vectors[2][2])
         origin = center - (np.ceil(np.array((width, width, width))))
