@@ -44,7 +44,8 @@ def _normalization(data, a=0, b=0):
     """
     min_data = np.min(data)
     max_data = np.max(data)
-    return a + ((data - min_data) * (b - a)) / (max_data - min_data)
+    epsilon = 1e-10  # small value to avoid division by zero
+    return a + ((data - min_data) * (b - a)) / (max_data - min_data + epsilon)
 
 
 def _smooth_grid_free_energy(gfe, sigma=1):
@@ -341,6 +342,7 @@ class Report:
         cmd_string += f"cmd.load_traj('{trajectory}', start=0, stop=1)\n"
 
         # Load density
+        # FIXME #43 this will fail if naming is not like this
         for idx, density in enumerate(density_files):
             cosolv = density.split('_')[-1]
 
