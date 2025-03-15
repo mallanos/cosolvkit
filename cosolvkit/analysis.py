@@ -27,7 +27,7 @@ from pymol import cmd, stored
 from cosolvkit.cosolvent_system import CosolventMolecule
 
 
-BOLTZMANN_CONSTANT_KB = 0.0019872041
+BOLTZMANN_CONSTANT_KB = 0.0019872041  # kcal/(mol*K)
 
 
 def _normalization(data, a=0, b=0):
@@ -70,26 +70,40 @@ def _smooth_grid_free_energy(gfe, sigma=1):
 
     return gfe
 
-
 def _grid_free_energy(hist, volume_water, gridsize, n_atoms, n_frames, temperature=300.):
-    # Avoid 0 in the histogram for the log function
-    hist = hist + 1E-20
-    # The volume here is the volume of water and not the entire box
-    volume_voxel = gridsize **3
-    n_voxel = volume_water / volume_voxel
-    # Probability of the solute in the bulk (without protein)
-    N_o = n_atoms / n_voxel
-    # Probability of the solute (with the protein)
-    N = hist / n_frames
-    # Atomic grid free energy
+    """
+    Compute the atomic grid free energy (GFE) from a given histogram.
+    
+    :param hist: Histogram of cosolvent occupancy in each voxel
+    :param volume_water: Volume of solvent region (not total box volume)
+    :param gridsize: Voxel size (in same units as volume)
+    :param n_atoms: Total number of cosolvent atoms (not total system atoms)
+    :param n_frames: Number of frames in the trajectory
+    :param temperature: Temperature in Kelvin (default 300K)
+    :return: 3D numpy array of free energy values (same shape as `hist`)
+    """
+    hist = hist + 1E-20  # Avoid log(0)
+    
+    volume_voxel = gridsize ** 3
+    n_voxel = volume_water / volume_voxel  # Number of voxels in solvent region
+
+    N_o = n_atoms / n_voxel  # Bulk probability of cosolvent
+    N = hist / n_frames  # Local probability in the grid
+
+    print(f"Min N: {np.min(N)}, Max N: {np.max(N)}, Min N_o: {np.min(N_o)}, Max N_o: {np.max(N_o)}")
+
+    #if hist contains very low values (or zeros), N = hist / n_frames can be much smaller than N_o
+    # making log(N / N_o) too negative and gfe extremely large.
+    N = np.max(N, 1E-10)
+   
     gfe = -(BOLTZMANN_CONSTANT_KB * temperature) * np.log(N / N_o)
+
+    print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
 
     return gfe
 
-
 def _grid_density(hist):
     return (hist - np.mean(hist)) / np.std(hist)
-
 
 def _subset_grid(grid, center, box_size, gridsize=0.5):
     # Create grid interpolator
