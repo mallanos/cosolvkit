@@ -10,19 +10,16 @@ import os
 import sys
 import json
 import numpy as np
-from scipy import spatial
 from scipy.ndimage import gaussian_filter
 from scipy.signal import correlate
 from scipy.interpolate import RegularGridInterpolator
 from gridData import Grid
-import MDAnalysis as mda
 from MDAnalysis import Universe
 from MDAnalysis.analysis import rdf
 from MDAnalysis.analysis.base import AnalysisBase
 import matplotlib.pyplot as plt
-import matplotlib.style as style
 import pandas as pd
-import pymol
+# import pymol
 from pymol import cmd, stored
 from cosolvkit.cosolvent_system import CosolventMolecule
 
@@ -148,7 +145,6 @@ def _subset_grid(grid, center, box_size, gridsize=0.5):
 
     return sub_grid
 
-
 def _export(fname, grid, gridsize=0.5, center=None, box_size=None):
     assert (center is None and box_size is None) or (center is not None and box_size is not None), \
            "Both center and box size have to be defined, or none of them."
@@ -173,7 +169,7 @@ class Analysis(AnalysisBase):
     :param AnalysisBase: Base MDAnalysis class
     :type AnalysisBase: AnalysisBase
     """
-    def __init__(self, atomgroup, gridsize=0.5, **kwargs):
+    def __init__(self, atomgroup, gridsize=0.375, **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
         if atomgroup.n_atoms == 0:
