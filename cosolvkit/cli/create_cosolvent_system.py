@@ -117,6 +117,7 @@ def main():
         if config.membrane:
             cosolv_system = CosolventMembraneSystem(cosolvents=cosolvents,
                                                     forcefields=forcefields,
+                                                    ligands=config.ligands,
                                                     simulation_format=config.md_format,
                                                     modeller=protein_modeller,
                                                     radius=config.radius,
@@ -128,6 +129,7 @@ def main():
         else:
             cosolv_system = CosolventSystem(cosolvents=cosolvents,
                                             forcefields=forcefields,
+                                            ligands=config.ligands,
                                             simulation_format=config.md_format,
                                             modeller=protein_modeller,
                                             radius=config.radius)

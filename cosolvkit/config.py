@@ -21,6 +21,7 @@ class Config(object):
                  repulsive_sigma=None,
                  solvent_smiles=None,
                  solvent_copies=None,
+                 ligands= dict(),
                  membrane=False,
                  lipid_type=None,
                  lipid_patch_path=None,
@@ -43,6 +44,7 @@ class Config(object):
         self.repulsive_sigma = repulsive_sigma
         self.solvent_smiles = solvent_smiles
         self.solvent_copies = solvent_copies
+        self.ligands = ligands
         self.membrane = membrane
         self.lipid_type = lipid_type
         self.lipid_patch_path = lipid_patch_path

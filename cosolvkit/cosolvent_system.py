@@ -16,10 +16,12 @@ import openmm.unit as openmmunit
 import rdkit
 from rdkit import Chem
 from rdkit.Chem import AllChem
+from rdkit.Chem import SDMolSupplier
 from openff.toolkit import Molecule, Topology
 from openmmforcefields.generators import EspalomaTemplateGenerator, GAFFTemplateGenerator, SMIRNOFFTemplateGenerator
 from openmmforcefields.generators.template_generators import SmallMoleculeTemplateGenerator
 from cosolvkit.utils import fix_pdb, MutuallyExclusiveParametersError, MD_FORMAT_EXTENSIONS
+from openff.units.openmm import to_openmm
 
 
 proteinResidues = ['ALA', 'ASN', 'CYS', 'GLU', 'HIS', 'LEU', 'MET', 'PRO', 'THR', 'TYR', 'ARG', 'ASP', 'GLN', 'GLY', 'ILE', 'LYS', 'PHE', 'SER', 'TRP', 'VAL']
@@ -160,6 +162,7 @@ class CosolventSystem(object):
     def __init__(self, 
                  cosolvents: dict,
                  forcefields: dict,
+                 ligands: dict,
                  simulation_format: str, 
                  modeller: app.Modeller,  
                  padding: openmmunit.Quantity = 12*openmmunit.angstrom, 
@@ -170,6 +173,8 @@ class CosolventSystem(object):
         :type cosolvents: dict
         :param forcefields: dictionary of forcefields to use
         :type forcefields: dict
+        :param ligands: dictionary of ligands to use
+        :type ligands: dict
         :param simulation_format: MD format that want to be used for the simulation. Supported formats: Amber, Gromacs, CHARMM, openMM 
         :type simulation_format: str
         :param modeller: openmm modeller created from topology and positions.
@@ -195,7 +200,11 @@ class CosolventSystem(object):
         self.modeller = None
         self.cosolvents = dict()
         self.radius = radius
+        self.small_molecule_forcefield = forcefields["small_molecules"][0]
+
         assert (simulation_format.upper() in self._available_formats), f"Error! The simulation format supplied is not supported! Available simulation engines:\n\t{self._available_formats}"
+        
+        self.ligands = ligands
 
         # Creating cosolvent molecules
         for c in cosolvents:
@@ -256,6 +265,11 @@ class CosolventSystem(object):
         else:
             cosolv_xyzs = self.add_cosolvents(self.cosolvents, self.vectors, self.lowerBound, self.upperBound, receptor_positions)
         self.modeller = self._setup_new_topology(cosolv_xyzs, self.modeller.topology, self.modeller.positions)
+        
+        # Parametrize ligands
+        if self.ligands is not None:
+            self._parametrize_ligands(self.ligands)
+
         if solvent_smiles == "H2O":
             if n_solvent_molecules is None: self.modeller.addSolvent(self.forcefield, neutralize=neutralize)
             else: self.modeller.addSolvent(self.forcefield, numAdded=n_solvent_molecules, neutralize=neutralize)
@@ -498,6 +512,7 @@ class CosolventSystem(object):
             new_mod.add(new_top, molecules_positions)
             
         new_mod.topology.setPeriodicBoxVectors(self._periodic_box_vectors)
+
         return new_mod
     
     def _to_openmm_topology(self, off_topology: Topology, starting_id: int) -> app.Topology:
@@ -1150,6 +1165,55 @@ class CosolventSystem(object):
         else:
             small_ff = SMIRNOFFTemplateGenerator(molecules=molecules)
         return small_ff
+           
+    def _parametrize_ligands(self, ligands: dict) -> None:
+        """Parametrizes ligands according to the forcefiled specified.
+
+        :param ligands: ligands specified
+        :type ligands: dict
+        :param small_molecule_ff: name of the forcefield to use, defaults to "espaloma"
+        :type small_molecule_ff: str, optional
+        :return: forcefield object for the small molecules
+        :rtype: SmallMoleculeTemplateGenerator
+        """
+        for ligname, lig_path in ligands.items():
+            try:
+                rdkit_mol = SDMolSupplier(lig_path)[0]
+                ligand = Molecule.from_rdkit(rdkit_mol, allow_undefined_stereo=True)
+                
+                if self.small_molecule_forcefield == "espaloma":
+                    template_generator = EspalomaTemplateGenerator(
+                        molecules=ligand, forcefield="espaloma-0.3.2"
+                    )
+                elif self.small_molecule_forcefield == "SMIRNOFF":
+                    template_generator = SMIRNOFFTemplateGenerator(
+                        molecules=ligand, forcefield="openff-1.2.0"
+                    )
+                elif self.small_molecule_forcefield == "GAFF":
+                    template_generator = GAFFTemplateGenerator(
+                        molecules=ligand, forcefield="gaff-2.11"
+                    )
+
+                # add the template generator to the ff
+                self.forcefield.registerTemplateGenerator(template_generator.generator)
+
+                # make an OpenFF Topology of the ligand
+                ligand_off_topology = Topology.from_molecules(molecules=[ligand])
+
+                # convert it to an OpenMM Topology
+                ligand_topology = ligand_off_topology.to_openmm()
+
+                # get the positions of the ligand
+                ligand_positions = to_openmm(ligand.conformers[0])
+                
+                for res in ligand_topology.residues():
+                    res.name = ligname
+                self.modeller.add(ligand_topology, ligand_positions)
+
+            except Exception as e:
+                print(f'Something went wrong parametrizing {ligname} with {self.small_molecule_forcefield} forcefield\n{e}')
+                sys.exit(1)
+        return None
 #endregion
     
 #region SimulationBox
@@ -1207,6 +1271,7 @@ class CosolventMembraneSystem(CosolventSystem):
     def __init__(self, 
                  cosolvents: str,
                  forcefields: str,
+                 ligands: dict,
                  simulation_format: str, 
                  modeller: app.Modeller,  
                  padding: openmmunit.Quantity = 12*openmmunit.angstrom, 
@@ -1236,6 +1301,7 @@ class CosolventMembraneSystem(CosolventSystem):
         """
         super().__init__(cosolvents=cosolvents,
                          forcefields=forcefields,
+                         ligands=ligands,
                          simulation_format=simulation_format,
                          modeller=modeller,
                          padding=padding,
@@ -1354,7 +1420,6 @@ class CosolventMembraneSystem(CosolventSystem):
             cosolv_xyzs = self.add_cosolvents(self.cosolvents, self.vectors, lowerBound, upperBound, receptor_positions)
         self.modeller = self._setup_new_topology(cosolv_xyzs, self.modeller.topology, self.modeller.positions)
         self.modeller.addSolvent(forcefield=self.forcefield, neutralize=neutralize)
-            
         self.system = self._create_system(self.forcefield, self.modeller.topology)
         return
         

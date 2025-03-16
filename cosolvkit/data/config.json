@@ -11,6 +11,7 @@
   "repulsive_sigma": 4.0,
   "solvent_smiles": "H2O",
   "solvent_copies": null,
+  "ligands": {},
   "membrane": false,
   "lipid_type": "POPC",
   "lipid_patch_path": null,
