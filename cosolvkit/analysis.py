@@ -339,7 +339,9 @@ class Report:
                                cosolvent_name=None)
         return
     
-    def generate_pymol_reports(self, density_files:list[str]=None, selection_string:str=None, reference_pdb:str=None):
+    def generate_pymol_reports(self, density_files:list[str]=None, 
+                               selection_string:str=None, 
+                               reference_pdb:str=None):
         """Generate the PyMol reports from the density maps.
 
         :param reference_pdb: reference pdb file to load in PyMol.
@@ -354,7 +356,7 @@ class Report:
                   'magenta',
                   'salmon',
                   'purple']
-        
+
         assert len(density_files) <= len(colors), "Error! Too many density files, not enough colors available!"
 
         if reference_pdb is None:
@@ -363,38 +365,29 @@ class Report:
         structure_name = os.path.basename(reference_pdb).split('.')[0]
         
         cmd_string = ""
+
         # Load topology and first frame of the trajectory
         cmd.load(reference_pdb,structure_name)
         cmd_string += f"cmd.load('{reference_pdb}', {structure_name})\n"
 
-        # Load density
-        # FIXME #43 this will fail if naming is not like this
-        for idx, density in enumerate(density_files):
-            cosolv = density.split('_')[-1]
-
-            cmd.load(density, f"density_map_{cosolv}")
-            cmd_string += f"cmd.load('{density}', 'density_map_{cosolv}')\n"
-
         # Set structure's color
         cmd.color("grey50", f"{structure_name} and name C*")
-
-        # Remove solvent and organic molecules
-        cmd.remove("solvent")
-        cmd.remove("org")
         cmd_string += f"cmd.color('grey50', '{structure_name} and name C*')\n"
-        cmd_string += f"cmd.remove('solvent')\n"
-        cmd_string += f"cmd.remove('org')\n"
 
-        for idx, density in enumerate(density_files):
-            cosolv = density.split('_')[-1]
+        for color, density in zip(colors, density_files):
+            dens_name = os.path.basename(density).split('.')[0]
+            # print(f"Loading density map: {dens_name}")
+
+            cmd.load(density, f'{dens_name}_map')
+            cmd_string += f"cmd.load('{density}', '{dens_name}_map')\n"
 
             # Create isomesh for hydrogen bond probes
-            cmd.isomesh(f"dens_{cosolv}", f"density_map_{cosolv}", 10)
+            cmd.isomesh(f'{dens_name}_mesh', f'{dens_name}_map', -0.5)
+            cmd_string += f"cmd.isomesh('{dens_name}_mesh', '{dens_name}_map', -1)\n"
 
-            # Color the hydrgen bond isomesh
-            cmd.color(colors[idx], f"dens_{cosolv}")
-            cmd_string += f"cmd.isomesh('dens_{cosolv}', 'density_map_{cosolv}', -1)\n"
-            cmd_string += f"cmd.color('{colors[idx]}', 'dens_{cosolv}')\n"
+            # Color the hydrogen bond isomesh
+            cmd.color(color, f'{dens_name}_mesh')
+            cmd_string += f"cmd.color('{colors}', '{dens_name}_mesh')\n"
             
         # Show sticks for the residues of interest
         if selection_string != '':
@@ -403,15 +396,18 @@ class Report:
 
         cmd.hide("spheres")
         # Set valence to 0 - no double bonds
-        cmd.set("valence", 0)
+        # cmd.set("valence", 0)
+        cmd.set('specular', 1)
         # Set cartoon_side_chain_helper to 1 - less messy
         cmd.set("cartoon_side_chain_helper", 1)
         # Set background color
-        cmd.bg_color("grey80")
+        cmd.bg_color("white") #grey80
+
         cmd_string += "cmd.hide('spheres')\n"
-        cmd_string += "cmd.set('valence', 0)\n"
+        # cmd_string += "cmd.set('valence', 0)\n"
+        cmd_string += "cmd.set('specular', 1)\n"
         cmd_string += "cmd.set('cartoon_side_chain_helper', 1)\n"
-        cmd_string += "cmd.bg_color('grey80')"
+        cmd_string += "cmd.bg_color('white')"
         
         with open(os.path.join(self.out_path, "pymol_session_cmd.pml"), "w") as fo:
             fo.write(cmd_string)
