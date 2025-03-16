@@ -15,12 +15,11 @@ from scipy.signal import correlate
 from scipy.interpolate import RegularGridInterpolator
 from gridData import Grid
 from MDAnalysis import Universe
-from MDAnalysis.analysis import rdf
+from MDAnalysis.analysis import rdf, align
 from MDAnalysis.analysis.base import AnalysisBase
 import matplotlib.pyplot as plt
 import pandas as pd
-# import pymol
-from pymol import cmd, stored
+from pymol import cmd
 from cosolvkit.cosolvent_system import CosolventMolecule
 
 
@@ -169,7 +168,7 @@ class Analysis(AnalysisBase):
     :param AnalysisBase: Base MDAnalysis class
     :type AnalysisBase: AnalysisBase
     """
-    def __init__(self, atomgroup, gridsize=0.375, **kwargs):
+    def __init__(self, atomgroup, gridsize=0.5, **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
         if atomgroup.n_atoms == 0:
@@ -280,6 +279,15 @@ class Report:
         self._potential_energy, self._temperature, self._volume = self._get_temp_vol_pot(self.statistics)
         return
     
+    def _average_universe(self, outfname:str='average.pdb') -> Universe:
+        "Get the average structure of the trajectory"
+        average = align.AverageStructure(self.universe, 
+                                        None,
+                                        select='protein',
+                                        filename=outfname,
+                                        ).run()
+        return average.results.universe
+
     def generate_report(self, out_path):
         """Creates the main plots for RDFs, autocorrelations and equilibration.
 
