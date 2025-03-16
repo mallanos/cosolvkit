@@ -42,10 +42,10 @@ or directly download and install the source code from git:
 I highly recommend you to install the Anaconda distribution (https://www.continuum.io/downloads) if you want a clean python environnment with nearly all the prerequisites already installed. To install everything properly, you just have to do this (for faster installation, use `mamba` or `micromamba` instead of `conda`):
 
 ```bash
-$ conda create -n cosolvkit -c conda-forge -f environment.yml
-$ conda activate cosolvkit
 $ git clone https://github.com/forlilab/cosolvkit
 $ cd cosolvkit
+$ conda create -n cosolvkit -c conda-forge -f environment.yml
+$ conda activate cosolvkit
 $ pip install -e .
 ```
 
