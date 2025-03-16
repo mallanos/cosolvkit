@@ -29,78 +29,89 @@ from cosolvkit.cosolvent_system import CosolventMolecule
 
 BOLTZMANN_CONSTANT_KB = 0.0019872041  # kcal/(mol*K)
 
-
-def _normalization(data, a=0, b=0):
+def _normalization(data, a:float=None, b:float=None):
     """_summary_
 
     :param data: list of data points
     :type data: list
-    :param a: int a, defaults to 0
+    :param a: int a, defaults to None
     :type a: int, optional
-    :param b: int b, defaults to 0
+    :param b: int b, defaults to None
     :type b: int, optional
     :return: normalized data
     :rtype: list
     """
     min_data = np.min(data)
     max_data = np.max(data)
-    epsilon = 1e-10  # small value to avoid division by zero
+    epsilon = 1e-20  # small value to avoid division by zero
     return a + ((data - min_data) * (b - a)) / (max_data - min_data + epsilon)
 
-
-def _smooth_grid_free_energy(gfe, sigma=1):
-    """_summary_
-
-    :param gfe: _description_
-    :type gfe: _type_
-    :param sigma: _description_, defaults to 1
-    :type sigma: int, optional
-    :return: _description_
-    :rtype: _type_
-    """
-    # We keep only the favorable spots with energy < 0 kcal/mol
-    gfe_fav = np.copy(gfe)
-    gfe_fav[gfe > 0.] = 0.
-    # We smooth the energy a bit
-    gfe_fav_smooth = gaussian_filter(gfe_fav, sigma=sigma)
-    # Normalize data between the original energy minima value and 0
-    gfe_smooth_norm = _normalization(gfe_fav_smooth, np.min(gfe_fav), np.max(gfe_fav))
-    # Put the favorable smoothed data in the original grid
-    gfe[gfe_smooth_norm < 0] = gfe_smooth_norm[gfe_smooth_norm < 0]
-
-    return gfe
-
-def _grid_free_energy(hist, volume_water, gridsize, n_atoms, n_frames, temperature=300.):
+def _grid_free_energy(hist, n_atoms, n_frames, temperature=300.):
     """
     Compute the atomic grid free energy (GFE) from a given histogram.
     
     :param hist: Histogram of cosolvent occupancy in each voxel
-    :param volume_water: Volume of solvent region (not total box volume)
-    :param gridsize: Voxel size (in same units as volume)
     :param n_atoms: Total number of cosolvent atoms (not total system atoms)
     :param n_frames: Number of frames in the trajectory
     :param temperature: Temperature in Kelvin (default 300K)
     :return: 3D numpy array of free energy values (same shape as `hist`)
     """
-    hist = hist + 1E-20  # Avoid log(0)
-    
-    volume_voxel = gridsize ** 3
-    n_voxel = volume_water / volume_voxel  # Number of voxels in solvent region
+        
+    # Before the volume_water was calculated as the total volume of the box, but it should be the volume of the solvent region
+    # this approximation is not correct, but it is a good starting point
+    n_accessible_voxels = np.sum(hist > 0)  # Count nonzero occupancy voxels
 
-    N_o = n_atoms / n_voxel  # Bulk probability of cosolvent
+    hist = hist + 1E-20  # Avoid log(0)
+
+    N_o = n_atoms / n_accessible_voxels  # Bulk probability of cosolvent
     N = hist / n_frames  # Local probability in the grid
 
-    print(f"Min N: {np.min(N)}, Max N: {np.max(N)}, Min N_o: {np.min(N_o)}, Max N_o: {np.max(N_o)}")
+    # print(f"Min N: {np.min(N)}, Max N: {np.max(N)}, Min N_o: {np.min(N_o)}, Max N_o: {np.max(N_o)}")
 
     #if hist contains very low values (or zeros), N = hist / n_frames can be much smaller than N_o
     # making log(N / N_o) too negative and gfe extremely large.
-    N = np.max(N, 1E-10)
+    N = np.maximum(N, 1E-10)
    
     gfe = -(BOLTZMANN_CONSTANT_KB * temperature) * np.log(N / N_o)
 
-    print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
+    # print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
 
     return gfe
+
+def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0, sigma: float = 1):
+    """
+    Smooths and filters the grid free energy (GFE) map.
+
+    :param gfe: 3D numpy array of grid free energy values.
+    :param energy_cutoff: Cutoff energy (default: .0 kcal/mol). Only values below this are retained.
+    :param sigma: Standard deviation for Gaussian smoothing (default: 1).
+    :return: Smoothed and filtered grid free energy map (new array).
+    """
+
+    gfe_filtered = np.copy(gfe)
+
+    # the energy cutoff is applied before smoothing, 
+    gfe_filtered[gfe_filtered >= energy_cutoff] = 0.0
+
+    # Apply Gaussian smoothing AFTER filtering (not sure if this is the best approach)
+    gfe_smoothed = gaussian_filter(gfe_filtered, sigma=sigma)
+
+    if energy_cutoff is None:
+        energy_cutoff = np.median(gfe_smoothed)  # Default cutoff is the median energy value
+    
+    # print(f'Energy cutoff is: {energy_cutoff}')
+
+    # Keep only favorable energy values after smoothing
+    gfe_smoothed[gfe_smoothed >= energy_cutoff] = 0.0
+
+    # print(f'Min gfe_smoothed: {np.min(gfe_smoothed)}, Max gfe_smoothed: {np.max(gfe_smoothed)}')
+
+    # Normalize data between the original energy minima value and 0
+    gfe_smooth_norm = _normalization(gfe_smoothed, np.min(gfe_smoothed), 0)
+
+    # print(f'Min gfe_smooth_norm: {np.min(gfe_smooth_norm)}, Max gfe_smooth_norm: {np.max(gfe_smooth_norm)}')
+
+    return gfe_smooth_norm
 
 def _grid_density(hist):
     return (hist - np.mean(hist)) / np.std(hist)
@@ -215,14 +226,14 @@ class Analysis(AnalysisBase):
         positions = positions.reshape(new_shape)
         return positions
 
-    def atomic_grid_free_energy(self, volume, temperature=300., atom_radius=1.4, smoothing=True):
+    def atomic_grid_free_energy(self, temperature=300., atom_radius=1.4, smoothing=True):
         """Compute grid free energy.
         """
-        agfe = _grid_free_energy(self._histogram.grid, volume, self._gridsize, self._n_atoms, self._nframes, temperature)
+        agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
 
         if smoothing:
             # We divide by 3 in order to have radius == 3 sigma
-            agfe = _smooth_grid_free_energy(agfe, atom_radius / 3.)
+            agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 2., energy_cutoff=0)
 
         self._agfe = Grid(agfe, edges=self._histogram.edges)
 
@@ -292,7 +303,7 @@ class Report:
         self._rdf_mda(self.universe, self.cosolvents, rdf_path)
         return
     
-    def generate_density_maps(self, out_path, analysis_selection_string=""):
+    def generate_density_maps(self, out_path, temperature:float=None, analysis_selection_string=""):
         """Generates the desnity maps for the target cosolvents.
 
         :param out_path: path to where to save the density files.
@@ -302,21 +313,21 @@ class Report:
         """
         print("Generating density maps...")
         os.makedirs(out_path, exist_ok=True)
-        volume = self._volume[-1]
-        temperature = self._temperature[-1]
+
+        if temperature is None: # If temperature is not passed, so we take the last one from statistics
+            temperature = self._temperature[-1]
+
         if analysis_selection_string == "":
             print("No cosolvent specified for the densities analysis. Generating a density map for each cosolvent.")
             for cosolvent in self.cosolvents:
                 selection_string = f"resname {cosolvent.resname}"
                 self._run_analysis(selection_string=selection_string,
-                                   volume=volume,
                                    temperature=temperature,
                                    out_path=out_path,
                                    cosolvent_name=cosolvent.resname)
         else:
             print(f"Generating density maps for the following selection string: {analysis_selection_string}")
             self._run_analysis(selection_string=analysis_selection_string, 
-                               volume=volume,
                                temperature=temperature,
                                out_path=out_path,
                                cosolvent_name=None)
@@ -375,6 +386,7 @@ class Report:
 
         for idx, density in enumerate(density_files):
             cosolv = density.split('_')[-1]
+
             # Create isomesh for hydrogen bond probes
             cmd.isomesh(f"dens_{cosolv}", f"density_map_{cosolv}", 10)
 
@@ -406,13 +418,11 @@ class Report:
         cmd.save(os.path.join(out_path, "pymol_results_session.pse"))
         return
     
-    def _run_analysis(self, selection_string, volume, temperature, out_path, cosolvent_name=None):
+    def _run_analysis(self, selection_string, temperature, out_path, cosolvent_name=None):
         """Creates Analysis object and generates densities.
 
         :param selection_string: MD Analysis selection string.
         :type selection_string: str
-        :param volume: volume of the system.
-        :type volume: float
         :param temperature: temperature of the system.
         :type temperature: float
         :param out_path: path to where to save the results.
@@ -427,7 +437,7 @@ class Report:
             fig_energy_name =  os.path.join(out_path, f"map_agfe_{cosolvent_name}.dx")
         analysis = Analysis(self.universe.select_atoms(selection_string), verbose=True)
         analysis.run()
-        analysis.atomic_grid_free_energy(volume, temperature)
+        analysis.atomic_grid_free_energy(temperature)
         analysis.export_density(fig_density_name)
         analysis.export_atomic_grid_free_energy(fig_energy_name)
         self.density_file = fig_density_name
