@@ -6,21 +6,11 @@
 # Utils functions
 #
 
-import contextlib
-import os
-import tempfile
-import shutil
-import subprocess
-import importlib
 from typing import List, Tuple
-from collections import defaultdict
-
-import numpy as np
-import mdtraj
-from MDAnalysis import Universe
 from openmm.app import *
 from openmm import *
 import pdbfixer
+from openff.toolkit import Topology
 
 
 MD_FORMAT_EXTENSIONS = {
