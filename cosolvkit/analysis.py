@@ -378,12 +378,17 @@ class Report:
             dens_name = os.path.basename(density).split('.')[0]
             # print(f"Loading density map: {dens_name}")
 
+            dx_data = Grid(density)
+            # calculate 0.001 quantile. This works for agfe maps
+            dx_01 = np.quantile(dx_data.grid, 0.001)
+            # print(f"0.1% of the density map is: {dx_01}")
+
             cmd.load(density, f'{dens_name}_map')
             cmd_string += f"cmd.load('{density}', '{dens_name}_map')\n"
 
             # Create isomesh for hydrogen bond probes
-            cmd.isomesh(f'{dens_name}_mesh', f'{dens_name}_map', -0.5)
-            cmd_string += f"cmd.isomesh('{dens_name}_mesh', '{dens_name}_map', -1)\n"
+            cmd.isomesh(f'{dens_name}_mesh', f'{dens_name}_map', dx_01)
+            cmd_string += f"cmd.isomesh('{dens_name}_mesh', '{dens_name}_map', {dx_01})\n"
 
             # Color the hydrogen bond isomesh
             cmd.color(color, f'{dens_name}_mesh')
