@@ -42,7 +42,60 @@ def _normalization(data, a:float=None, b:float=None):
     epsilon = 1e-20  # small value to avoid division by zero
     return a + ((data - min_data) * (b - a)) / (max_data - min_data + epsilon)
 
-def _grid_free_energy(hist, n_atoms, n_frames, temperature=300.):
+def dynamic_threshold_smoothed(occupancy, sigma=1, percentile=85):
+    """
+    Smooths the occupancy map and sets a threshold dynamically.
+
+    :param occupancy: 3D numpy array of occupancy values.
+    :param sigma: Standard deviation for Gaussian smoothing.
+    :param percentile: Percentile for thresholding.
+    :return: Computed threshold.
+    """
+    occupancy = gaussian_filter(occupancy, sigma=sigma)
+    return np.percentile(occupancy, percentile)
+
+def compute_local_entropy(occupancy, radius=2):
+    """
+    Computes the local spatial entropy (LSE) of the occupancy map. Uses a very simple and cheap
+    method to estimate the local entropy of each voxel based on a smoothed occupancy map.
+    A Gaussian filter is applied to the occupancy map to estimate local probabilities, which are
+    then used to compute the local entropy. A KDE-based method would be toooo slow.
+
+    :param occupancy: 3D numpy array of occupancy values.
+    :param radius: Defines the neighborhood size.
+    :return: 3D numpy array of local entropy values.
+    """
+    
+    # Normalize occupancy to get probability distribution
+    occupancy_prob = occupancy / np.sum(occupancy)
+    
+    # Smooth the occupancy to estimate local probabilities
+    smoothed = gaussian_filter(occupancy_prob, sigma=radius)
+    
+    # Compute entropy per voxel
+    local_entropy = -smoothed * np.log(smoothed + 1e-10)  # Avoid log(0)
+    
+    return local_entropy
+
+def entropy_corrected_free_energy(gfe, occupancy, lambda_factor=0.5, radius=2):
+    """
+    Applies entropy correction to the grid free energy map.
+
+    :param gfe: 3D numpy array of free energy values.
+    :param occupancy: 3D numpy array of occupancy values.
+    :param lambda_factor: Scaling factor for entropy correction.
+    :param radius: Neighborhood size for entropy calculation.
+    :return: 3D numpy array of corrected free energy values.
+            """
+    # Compute local entropy
+    local_entropy = compute_local_entropy(occupancy, radius=radius)
+    
+    # Apply entropy correction
+    gfe_corrected = gfe + lambda_factor * local_entropy
+
+    return gfe_corrected
+
+def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correction=False):
     """
     Compute the atomic grid free energy (GFE) from a given histogram.
     
@@ -50,6 +103,7 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300.):
     :param n_atoms: Total number of cosolvent atoms (not total system atoms)
     :param n_frames: Number of frames in the trajectory
     :param temperature: Temperature in Kelvin (default 300K)
+    :param entropy_correction: Apply entropy correction to the free energy map (default False)
     :return: 3D numpy array of free energy values (same shape as `hist`)
     """
         
@@ -57,7 +111,9 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300.):
     # this approximation is not correct, but it is a good starting point
     n_accessible_voxels = np.sum(hist > 0)  # Count nonzero occupancy voxels
 
-    hist = hist + 1E-20  # Avoid log(0)
+    # Apply occupancy filtering: remove low-occupancy grid points
+    # occupancy_threshold = dynamic_threshold_smoothed(occupancy, sigma=1, percentile=85)s
+    # hist[occupancy < occupancy_threshold] = 0
 
     N_o = n_atoms / n_accessible_voxels  # Bulk probability of cosolvent
     N = hist / n_frames  # Local probability in the grid
@@ -70,11 +126,17 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300.):
    
     gfe = -(BOLTZMANN_CONSTANT_KB * temperature) * np.log(N / N_o)
 
-    # print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
+    print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
 
+    if entropy_correction:
+        gfe = entropy_corrected_free_energy(gfe, hist, lambda_factor=500, radius=2)
+        print(f'Min GFE corrected: {np.min(gfe)}, Max GFE corrected: {np.max(gfe)}')
+    
     return gfe
 
-def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0, sigma: float = 1):
+def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0, 
+                             sigma: float = 1, 
+                            ):
     """
     Smooths and filters the grid free energy (GFE) map.
 
@@ -87,32 +149,32 @@ def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0, sigma: float = 1):
     gfe_filtered = np.copy(gfe)
 
     # the energy cutoff is applied before smoothing, 
-    gfe_filtered[gfe_filtered >= energy_cutoff] = 0.0
+    # gfe_filtered[gfe_filtered >= energy_cutoff] = 0.0
 
     # Apply Gaussian smoothing AFTER filtering (not sure if this is the best approach)
     gfe_smoothed = gaussian_filter(gfe_filtered, sigma=sigma)
-
-    if energy_cutoff is None:
-        energy_cutoff = np.median(gfe_smoothed)  # Default cutoff is the median energy value
     
     # print(f'Energy cutoff is: {energy_cutoff}')
 
     # Keep only favorable energy values after smoothing
     gfe_smoothed[gfe_smoothed >= energy_cutoff] = 0.0
 
-    # print(f'Min gfe_smoothed: {np.min(gfe_smoothed)}, Max gfe_smoothed: {np.max(gfe_smoothed)}')
+    print(f'Min gfe_smoothed: {np.min(gfe_smoothed)}, Max gfe_smoothed: {np.max(gfe_smoothed)}')
 
-    # Normalize data between the original energy minima value and 0
-    gfe_smooth_norm = _normalization(gfe_smoothed, np.min(gfe_smoothed), 0)
+    # Normalization has not no effect
+    # gfe_smooth_norm = _normalization(gfe_smoothed,np.min(gfe_smoothed), 0.0)
 
-    # print(f'Min gfe_smooth_norm: {np.min(gfe_smooth_norm)}, Max gfe_smooth_norm: {np.max(gfe_smooth_norm)}')
+    # print(f'Min gfe_smooth_norm: {np.min(gfe_smoothed)}, Max gfe_smooth_norm: {np.max(gfe_smoothed)}')
 
-    return gfe_smooth_norm
+    return gfe_smoothed
 
 def _grid_density(hist):
     return (hist - np.mean(hist)) / np.std(hist)
 
 def _subset_grid(grid, center, box_size, gridsize=0.5):
+
+    #FIXME I think this part of the code is never triggered, not sure if we need this
+
     # Create grid interpolator
     # Number of midpoints is equal to the number of grid points
     grid_interpn = RegularGridInterpolator(grid.midpoints, grid.grid)
@@ -227,7 +289,7 @@ class Analysis(AnalysisBase):
         agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
 
         if smoothing:
-            # We divide by 3 in order to have radius == 3 sigma
+            # We divide by 2 in order to have radius == 2 sigma
             agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 2., energy_cutoff=0)
 
         self._agfe = Grid(agfe, edges=self._histogram.edges)
@@ -419,7 +481,7 @@ class Report:
             
         cmd.save(os.path.join(self.out_path, "pymol_results_session.pse"))
         return
-    
+
     def _run_analysis(self, selection_string, temperature, cosolvent_name=None):
         """Creates Analysis object and generates densities.
 
