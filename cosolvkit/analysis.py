@@ -368,23 +368,26 @@ class Report:
         plt.savefig(os.path.join(self.out_path, "rmsf_by_residue.png"))
         return
 
-    def _rmsf_analysis(self, avg_selection):
+    def _rmsf_analysis(self, avg_selection, align_selection):
         """Computes the RMSF of the protein residues. 
         The funciton also generates the average structure of the trajectory and colors the residues by RMSF.
         This conformtion will be used as a reference for the pymol session.
         As for the density analysis, this function also asumes that the trajectory is already aligned.
         :param avg_selection: selection string to average the trajectory.
         :type avg_selection: str
+        :param align_selection: selection string to align the trajectory to the average.
+        :type align_selection: str
         """
+        print("Computing RMSF...")
         average = align.AverageStructure(self.universe, None,
                                         select=avg_selection,
                                         ).run()
         
         u_avg = average.results.universe
         aligner = align.AlignTraj(self.universe, u_avg, 
-                                  select='protein and name CA', in_memory=True).run()
+                                  select=align_selection, in_memory=True).run()
 
-        selection = self.universe.select_atoms('protein')
+        selection = self.universe.select_atoms(avg_selection)
         residues = selection.resids
         rmsf = RMSF(selection).run()
 
@@ -401,21 +404,33 @@ class Report:
 
         return
 
-    def generate_report(self):
+    def generate_report(self, equilibration:bool=True, rmsf:bool=True, rdf:bool=True,
+                        avg_selection:str="protein",
+                        align_selection:str="protein and name CA"
+                        ):
         """Creates the main plots for RDFs, autocorrelations and equilibration.
+        :param equilibration: if True, the equilibration analysis will be performed, defaults to True
+        :type equilibration: bool, optional
+        :param rmsf: if True, the RMSF analysis will be performed, defaults to True
+        :type rmsf: bool, optional
+        :param rdf: if True, the RDF analysis will be performed, defaults to True
+        :type rdf: bool, optional
+        :param avg_selection: selection string to average the trajectory, defaults to "protein". Change this if you have other molecules in the system or things like DNA/RNA.
+        :type avg_selection: str, optional
+        :param align_selection: selection string to align the trajectory to the average, defaults to "protein and name CA". Change this if you have other molecules in the system or things like DNA/RNA.
+        :type align_selection: str, optional
         """
         print("Generating report...")
-        rdf_path = os.path.join(self.out_path, "RDFs")
-        os.makedirs(rdf_path, exist_ok=True)
 
-        print('Plotting equilibration data')
-        self._plot_temp_vol_pot(self.out_path)
+        if equilibration:
+            self._equilibration_analysis()
 
-        print('Plotting RMSF data')
-        self._rmsf_analysis(avg_selection='protein')
+        if rmsf:
+            # I exposed this to enable 
+            self._rmsf_analysis(avg_selection, align_selection)
 
-        print("Plotting RDFs")
-        self._rdf_mda(self.universe, self.cosolvents, rdf_path)
+        if rdf:
+            self._rfd_analysis(self.universe, self.cosolvents)
 
         return
     
@@ -569,14 +584,11 @@ class Report:
         vol = list(df["Box Volume (nm^3)"])
         return pot_e, temp, vol
 
-    def _plot_temp_vol_pot(self, outpath=None):
-        """Plots equilibration data.
+    def _equilibration_analysis(self):
+        """Plot equilibration data: potential energy, temperature and volume.
 
-        :param outpath: path to where to save the plot, defaults to None
-        :type outpath: str, optional
         """
-        if outpath is not None:
-            fig_name = f"{outpath}/simulation_statistics.png"
+        print('Plotting equilibration data..')
 
         fig, axs = plt.subplots(3, 1, figsize=(12, 6))
 
@@ -596,22 +608,26 @@ class Report:
         axs[2].set_ylabel('Temperature (K)')
 
         plt.tight_layout()
-        plt.savefig(fig_name)
+        plt.savefig(os.path.join(self.out_path, "equilibration_statistics.png"))
         plt.close()
 
         return 
     
-    def _rdf_mda(self, universe: Universe, cosolvents: list, outpath=None):
+    def _rfd_analysis(self, universe: Universe, cosolvents: list):
         """Generates the plots for RDFs and Autocorrelations.
 
         :param universe: MD Analysis Universe that is created from the topology and trajectories.
         :type universe: Universe
         :param cosolvents: list of cosolvents in the system
         :type cosolvents: list
-        :param outpath: path to where to save the plots, defaults to None
-        :type outpath: str, optional
         """
         np.seterr(divide='ignore', invalid='ignore')
+
+        outpath = os.path.join(self.out_path, "RDFs")
+        os.makedirs(outpath, exist_ok=True)
+
+        print("Running RDF analysis...")
+
         wat_resname = "HOH"
         # if top.endswith("cosolv_system.prmtop"):
         #     wat_resname = "WAT"
