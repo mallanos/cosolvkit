@@ -17,6 +17,7 @@ from gridData import Grid
 from MDAnalysis import Universe
 from MDAnalysis.analysis import rdf, align
 from MDAnalysis.analysis.base import AnalysisBase
+from MDAnalysis.analysis.rms import RMSF
 import matplotlib.pyplot as plt
 import pandas as pd
 from pymol import cmd
@@ -330,7 +331,6 @@ class Report:
         self.trajectory = traj_file
         self.topology = top_file
         self.universe = Universe(self.topology, self.trajectory)
-        self.avg_pdb_path = os.path.join(out_path, "average.pdb")
 
         self.cosolvents = list()
 
@@ -341,9 +341,8 @@ class Report:
 
         self.out_path = out_path
         os.makedirs(self.out_path, exist_ok=True)
-
+        # this will be checked when creating the sessions
         self.avg_pdb_path = os.path.join(self.out_path, "averaged_trajectory.pdb")
-        self._average_universe(avg_selection='protein')
 
         self._volume = None
         self._temperature = None
@@ -352,14 +351,55 @@ class Report:
         
         return
     
-    def _average_universe(self, avg_selection) -> Universe:
-        "Get the average structure of the trajectory"
-        average = align.AverageStructure(self.universe, 
-                                        None,
+    def _plot_rmsf(self, rmsf_df):
+        """Plots the RMSF of the protein residues.
+
+        :param rmsf_df: dataframe with the RMSF data per atom.
+        :type rmsf_df: pd.DataFrame
+        """
+        # Group by residue and calculate the mean RMSF
+        rmsf_df = rmsf_df.groupby('residue').mean().reset_index()
+
+        fig, ax = plt.subplots()
+        ax.plot(rmsf_df['residue'], rmsf_df['RMSF'])
+        ax.set_xlabel('Residue')
+        ax.set_ylabel('RMSF')
+        ax.set_title('RMSF of the protein residues')
+        plt.savefig(os.path.join(self.out_path, "rmsf_by_residue.png"))
+        return
+
+    def _rmsf_analysis(self, avg_selection):
+        """Computes the RMSF of the protein residues. 
+        The funciton also generates the average structure of the trajectory and colors the residues by RMSF.
+        This conformtion will be used as a reference for the pymol session.
+        As for the density analysis, this function also asumes that the trajectory is already aligned.
+        :param avg_selection: selection string to average the trajectory.
+        :type avg_selection: str
+        """
+        average = align.AverageStructure(self.universe, None,
                                         select=avg_selection,
-                                        filename=self.avg_pdb_path,
                                         ).run()
-        return 
+        
+        u_avg = average.results.universe
+        aligner = align.AlignTraj(self.universe, u_avg, 
+                                  select='protein and name CA', in_memory=True).run()
+
+        selection = self.universe.select_atoms('protein')
+        residues = selection.resids
+        rmsf = RMSF(selection).run()
+
+        rmsf_df = pd.DataFrame({'residue': residues, 'RMSF': rmsf.results.rmsf})
+        rmsf_df.index.name = 'atom'
+
+        self.universe.add_TopologyAttr('tempfactors') # add empty attribute for all atoms
+        for residue, r_value in zip(selection.residues, rmsf.results.rmsf):
+            residue.atoms.tempfactors = r_value
+        
+        selection.write(self.avg_pdb_path)
+        rmsf_df.to_csv(os.path.join(self.out_path, "rmsf_by_atom.csv"))    
+        self._plot_rmsf(rmsf_df)
+
+        return
 
     def generate_report(self):
         """Creates the main plots for RDFs, autocorrelations and equilibration.
@@ -370,6 +410,9 @@ class Report:
 
         print('Plotting equilibration data')
         self._plot_temp_vol_pot(self.out_path)
+
+        print('Plotting RMSF data')
+        self._rmsf_analysis(avg_selection='protein')
 
         print("Plotting RDFs")
         self._rdf_mda(self.universe, self.cosolvents, rdf_path)
@@ -404,7 +447,8 @@ class Report:
     def generate_pymol_reports(self, density_files:list[str]=None, 
                                selection_string:str=None, 
                                reference_pdb:str=None):
-        """Generate the PyMol reports from the density maps.
+        """Generate the PyMol reports from the density maps. The average structure is always used as a reference. 
+        You can also include a reference pdb file and specify the residues of interest. 
 
         :param reference_pdb: reference pdb file to load in PyMol.
         :type reference_pdb: str
@@ -420,21 +464,27 @@ class Report:
                   'purple']
 
         assert len(density_files) <= len(colors), "Error! Too many density files, not enough colors available!"
-
-        if reference_pdb is None:
-            reference_pdb = self.avg_pdb_path
-
-        structure_name = os.path.basename(reference_pdb).split('.')[0]
         
+        if not os.path.exists(self.avg_pdb_path):
+            # if the average pdb was not generated in the report, we generate it here
+            self._rmsf_analysis(avg_selection='protein')
+
+        structures = {'average_structure': self.avg_pdb_path}
+        if reference_pdb is not None and reference_pdb.endswith('.pdb'):
+            reference_pdb_name = os.path.basename(reference_pdb).split('.')[0]
+            structures[reference_pdb_name] = reference_pdb
+
         cmd_string = ""
 
-        # Load topology and first frame of the trajectory
-        cmd.load(reference_pdb,structure_name)
-        cmd_string += f"cmd.load('{reference_pdb}', {structure_name})\n"
+        for structure_name, pdb_path in structures.items():
 
-        # Set structure's color
-        cmd.color("grey50", f"{structure_name} and name C*")
-        cmd_string += f"cmd.color('grey50', '{structure_name} and name C*')\n"
+            # Load topology and first frame of the trajectory
+            cmd.load(pdb_path, structure_name)
+            cmd_string += f"cmd.load('{pdb_path}', {structure_name})\n"
+
+            # Set structure's color
+            cmd.color("grey50", f"{structure_name} and name C*")
+            cmd_string += f"cmd.color('grey50', '{structure_name} and name C*')\n"
 
         for color, density in zip(colors, density_files):
             dens_name = os.path.basename(density).split('.')[0]
