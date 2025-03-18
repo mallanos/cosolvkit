@@ -43,18 +43,6 @@ def _normalization(data, a:float=None, b:float=None):
     epsilon = 1e-20  # small value to avoid division by zero
     return a + ((data - min_data) * (b - a)) / (max_data - min_data + epsilon)
 
-def dynamic_threshold_smoothed(occupancy, sigma=1, percentile=85):
-    """
-    Smooths the occupancy map and sets a threshold dynamically.
-
-    :param occupancy: 3D numpy array of occupancy values.
-    :param sigma: Standard deviation for Gaussian smoothing.
-    :param percentile: Percentile for thresholding.
-    :return: Computed threshold.
-    """
-    occupancy = gaussian_filter(occupancy, sigma=sigma)
-    return np.percentile(occupancy, percentile)
-
 def compute_local_entropy(occupancy, radius=2):
     """
     Computes the local spatial entropy (LSE) of the occupancy map. Uses a very simple and cheap
@@ -96,7 +84,7 @@ def entropy_corrected_free_energy(gfe, occupancy, lambda_factor=0.5, radius=2):
 
     return gfe_corrected
 
-def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correction=False):
+def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correction=True):
     """
     Compute the atomic grid free energy (GFE) from a given histogram.
     
@@ -113,8 +101,10 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correct
     n_accessible_voxels = np.sum(hist > 0)  # Count nonzero occupancy voxels
 
     # Apply occupancy filtering: remove low-occupancy grid points
-    # occupancy_threshold = dynamic_threshold_smoothed(occupancy, sigma=1, percentile=85)s
+    # occupancy = hist / n_frames
+    # occupancy_threshold = 0.001
     # hist[occupancy < occupancy_threshold] = 0
+    hist[hist < 2] = 0
 
     N_o = n_atoms / n_accessible_voxels  # Bulk probability of cosolvent
     N = hist / n_frames  # Local probability in the grid
@@ -130,12 +120,14 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correct
     print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
 
     if entropy_correction:
-        gfe = entropy_corrected_free_energy(gfe, hist, lambda_factor=500, radius=2)
+        occupancy = hist / n_frames
+        gfe = entropy_corrected_free_energy(gfe, occupancy, lambda_factor=1000, radius=5)
         print(f'Min GFE corrected: {np.min(gfe)}, Max GFE corrected: {np.max(gfe)}')
     
     return gfe
 
-def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0, 
+def _smooth_grid_free_energy(gfe, 
+                             energy_cutoff: float = 0, 
                              sigma: float = 1, 
                             ):
     """
@@ -154,7 +146,6 @@ def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0,
 
     # Apply Gaussian smoothing AFTER filtering (not sure if this is the best approach)
     gfe_smoothed = gaussian_filter(gfe_filtered, sigma=sigma)
-    
     # print(f'Energy cutoff is: {energy_cutoff}')
 
     # Keep only favorable energy values after smoothing
@@ -163,7 +154,7 @@ def _smooth_grid_free_energy(gfe, energy_cutoff: float = 0,
     print(f'Min gfe_smoothed: {np.min(gfe_smoothed)}, Max gfe_smoothed: {np.max(gfe_smoothed)}')
 
     # Normalization has not no effect
-    # gfe_smooth_norm = _normalization(gfe_smoothed,np.min(gfe_smoothed), 0.0)
+    # gfe_smoothed = _normalization(gfe_smoothed, np.min(gfe_smoothed), 0.0)
 
     # print(f'Min gfe_smooth_norm: {np.min(gfe_smoothed)}, Max gfe_smooth_norm: {np.max(gfe_smoothed)}')
 
@@ -290,8 +281,8 @@ class Analysis(AnalysisBase):
         agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
 
         if smoothing:
-            # We divide by 2 in order to have radius == 2 sigma
-            agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 2., energy_cutoff=0)
+            # We divide by 3 in order to have radius == 3 sigma
+            agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
 
         self._agfe = Grid(agfe, edges=self._histogram.edges)
 
@@ -426,7 +417,6 @@ class Report:
             self._equilibration_analysis()
 
         if rmsf:
-            # I exposed this to enable 
             self._rmsf_analysis(avg_selection, align_selection)
 
         if rdf:
