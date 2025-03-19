@@ -381,11 +381,13 @@ class Report:
         average = align.AverageStructure(self.universe, None,
                                         select=avg_selection,
                                         ).run()
-        
+        #TODO use RMSD to align the trajectory to the average and get the rmsd as well.
+        # this is useful to assess convergence of the simulation
+
         u_avg = average.results.universe
         aligner = align.AlignTraj(self.universe, u_avg, 
                                   select=align_selection, in_memory=True).run()
-
+        
         selection = self.universe.select_atoms(avg_selection)
         residues = selection.resids
         rmsf = RMSF(selection).run()
@@ -403,13 +405,18 @@ class Report:
 
         return
 
-    def _survivalProbability_analysis(self, candidate_residues: list[tuple], 
+    def _survivalProbability_analysis(self, 
+                                       cosolvent_names: list[str] = None,
+                                       candidate_residues: list[tuple] = None, 
                                        radius: float = 5, max_tau: int = 100
                                        ):
         """Computes the survival probability of the cosolvent around a spherical zone centered 
         at the COM of the candidate residues. Uses the waterdynamics package to compute the survival 
         probability. The results are saved in a csv file and a plot is generated.
+        ProTip: pass the residue name of water to analyze the water survival probability.
 
+        :param cosolvent_names: list of cosolvent names to analyze.
+        :type cosolvent_names: list[str]
         :param candidate_residues: list of tuples with the candidate residues to analyze.
         :type candidate_residues: list[tuple]
         :param radius: radius of the sphere to analyze.
@@ -417,7 +424,6 @@ class Report:
         :param max_tau: maximum tau to analyze.
         :type max_tau: int
         """
-        cosolvent_names = [cosolvent.resname for cosolvent in self.cosolvents]
 
         for cosolvent_name in cosolvent_names:
             data = []
@@ -460,6 +466,7 @@ class Report:
                         equilibration:bool=True, rmsf:bool=True, rdf:bool=True, sp:bool=True,
                         avg_selection:str="protein",
                         align_selection:str="protein and name CA",
+                        sp_cosolvent_names: list[str]=None,
                         sp_residues: list[tuple]=None,
                         ):
         """Creates the main plots for RDFs, autocorrelations and equilibration.
@@ -475,6 +482,8 @@ class Report:
         :type avg_selection: str, optional
         :param align_selection: selection string to align the trajectory to the average, defaults to "protein and name CA". Change this if you have other molecules in the system or things like DNA/RNA.
         :type align_selection: str, optional
+        :param sp_cosolvent_names: list of cosolvent names to analyze, defaults to None.
+        :type sp_cosolvent_names: list[str], optional
         :param sp_residues: residues to analyze for the survival probability, defaults to None.
         :type sp_residues: list[tuple], optional
         """
@@ -487,7 +496,11 @@ class Report:
         if rdf:
             self._rfd_analysis(self.universe, self.cosolvents)
         if sp:
-            self._survivalProbability_analysis(sp_residues)
+            assert sp_residues is not None, "Error! You need to pass the residues to analyze for the survival probability."
+            if sp_cosolvent_names is None:
+                print("No cosolvent specified for the survival probability analysis. Using all cosolvents...")
+                sp_cosolvent_names = [cosolvent.resname for cosolvent in self.cosolvents]
+            self._survivalProbability_analysis(sp_cosolvent_names, sp_residues)
         return
     
     def generate_density_maps(self, temperature:float=None, analysis_selection_string=""):
