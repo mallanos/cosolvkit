@@ -413,6 +413,8 @@ class Report:
         """Computes the survival probability of the cosolvent around a spherical zone centered 
         at the COM of the candidate residues. Uses the waterdynamics package to compute the survival 
         probability. The results are saved in a csv file and a plot is generated.
+        More info: https://www.mdanalysis.org/waterdynamics/api.html#waterdynamics.SurvivalProbability
+        
         ProTip: pass the residue name of water to analyze the water survival probability.
 
         :param cosolvent_names: list of cosolvent names to analyze.
@@ -438,7 +440,8 @@ class Report:
                 # print(f"Selection string: {select}")
 
                 sp = SP(self.universe, select, verbose=True)
-                sp.run(tau_max=max_tau)
+                # The default intermittency is continuous (0).
+                sp.run(tau_max=max_tau, residues=False, intermittency=0)
 
                 for tau, sp_value in zip(sp.tau_timeseries,  sp.sp_timeseries):
                         data.append({'Group': res_idx, 'Residues':residue_group, 
