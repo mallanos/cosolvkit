@@ -10,19 +10,26 @@ import os
 import sys
 import json
 import numpy as np
+import pandas as pd
+
 from scipy.ndimage import gaussian_filter
 from scipy.signal import correlate
 from scipy.interpolate import RegularGridInterpolator
 from gridData import Grid
+
 from MDAnalysis import Universe
 from MDAnalysis.analysis import rdf, align
 from MDAnalysis.analysis.base import AnalysisBase
 from MDAnalysis.analysis.rms import RMSF
+from waterdynamics import SurvivalProbability as SP
+
 import matplotlib.pyplot as plt
-import pandas as pd
+import seaborn as sns
+sns.set_style("whitegrid")
+sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+
 from pymol import cmd
 from cosolvkit.cosolvent_system import CosolventMolecule
-
 
 BOLTZMANN_CONSTANT_KB = 0.0019872041  # kcal/(mol*K)
 
@@ -353,10 +360,11 @@ class Report:
 
         fig, ax = plt.subplots()
         ax.plot(rmsf_df['residue'], rmsf_df['RMSF'])
-        ax.set_xlabel('Residue')
-        ax.set_ylabel('RMSF')
+        ax.set_xlabel('Residue');        ax.set_ylabel('RMSF')
         ax.set_title('RMSF of the protein residues')
+        plt.tight_layout()
         plt.savefig(os.path.join(self.out_path, "rmsf_by_residue.png"))
+        plt.close()
         return
 
     def _rmsf_analysis(self, avg_selection, align_selection):
@@ -395,9 +403,64 @@ class Report:
 
         return
 
-    def generate_report(self, equilibration:bool=True, rmsf:bool=True, rdf:bool=True,
+    def _survivalProbability_analysis(self, candidate_residues: list[tuple], 
+                                       radius: float = 5, max_tau: int = 100
+                                       ):
+        """Computes the survival probability of the cosolvent around a spherical zone centered 
+        at the COM of the candidate residues. Uses the waterdynamics package to compute the survival 
+        probability. The results are saved in a csv file and a plot is generated.
+
+        :param candidate_residues: list of tuples with the candidate residues to analyze.
+        :type candidate_residues: list[tuple]
+        :param radius: radius of the sphere to analyze.
+        :type radius: float
+        :param max_tau: maximum tau to analyze.
+        :type max_tau: int
+        """
+        cosolvent_names = [cosolvent.resname for cosolvent in self.cosolvents]
+
+        for cosolvent_name in cosolvent_names:
+            data = []
+            for res_idx, residue_group in enumerate(candidate_residues):
+                # Ensure residue_group is not an int when only one residue is passed
+                if isinstance(residue_group, int):
+                    residue_group = (residue_group,)
+                
+                resids = ' or '.join([f'resid {res}' for res in residue_group])
+                print(f"Analyzing residues: {' '.join([str(i) for i in residue_group])} for cosolvent {cosolvent_name}")
+                select = f"resname {cosolvent_name} and sphzone {radius} ({resids})"
+                # print(f"Selection string: {select}")
+
+                sp = SP(self.universe, select, verbose=True)
+                sp.run(tau_max=max_tau)
+
+                for tau, sp_value in zip(sp.tau_timeseries,  sp.sp_timeseries):
+                        data.append({'Group': res_idx, 'Residues':residue_group, 
+                                     'Time': tau, 'SP': sp_value, 'Cosolvent': cosolvent_name})
+
+            df_sp = pd.DataFrame(data)
+            df_sp.to_csv(os.path.join(self.out_path, f"survival_probability_{cosolvent_name}.csv"))
+
+            # Plot the survival probability
+            sns.lineplot(data=df_sp, x='Time', y='SP', hue='Group', palette='flare')
+            plt.xlabel('lagtimes'); plt.ylabel('Survival Probability')
+            plt.title(f'Cosolvent {cosolvent_name} Survival Probability by Residue Group')
+
+            # Update legend to show residue indices instead of group numbers
+            handles, labels = plt.gca().get_legend_handles_labels()
+            new_labels = [f"Residues: {', '.join(map(str, candidate_residues[int(label)] if isinstance(candidate_residues[int(label)], (list, tuple)) else (candidate_residues[int(label)],)))}" for label in labels]
+            plt.legend(handles, new_labels, title='')
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.out_path, f"survival_probability_{cosolvent_name}.png"))
+            plt.close()
+
+        return
+
+    def generate_report(self, 
+                        equilibration:bool=True, rmsf:bool=True, rdf:bool=True, sp:bool=True,
                         avg_selection:str="protein",
-                        align_selection:str="protein and name CA"
+                        align_selection:str="protein and name CA",
+                        sp_residues: list[tuple]=None,
                         ):
         """Creates the main plots for RDFs, autocorrelations and equilibration.
         :param equilibration: if True, the equilibration analysis will be performed, defaults to True
@@ -406,26 +469,29 @@ class Report:
         :type rmsf: bool, optional
         :param rdf: if True, the RDF analysis will be performed, defaults to True
         :type rdf: bool, optional
+        :param sp: if True, the survival probability analysis will be performed, defaults to True
+        :type sp: bool, optional
         :param avg_selection: selection string to average the trajectory, defaults to "protein". Change this if you have other molecules in the system or things like DNA/RNA.
         :type avg_selection: str, optional
         :param align_selection: selection string to align the trajectory to the average, defaults to "protein and name CA". Change this if you have other molecules in the system or things like DNA/RNA.
         :type align_selection: str, optional
+        :param sp_residues: residues to analyze for the survival probability, defaults to None.
+        :type sp_residues: list[tuple], optional
         """
         print("Generating report...")
 
         if equilibration:
             self._equilibration_analysis()
-
         if rmsf:
             self._rmsf_analysis(avg_selection, align_selection)
-
         if rdf:
             self._rfd_analysis(self.universe, self.cosolvents)
-
+        if sp:
+            self._survivalProbability_analysis(sp_residues)
         return
     
     def generate_density_maps(self, temperature:float=None, analysis_selection_string=""):
-        """Generates the desnity maps for the target cosolvents.
+        """Generates the density maps for the target cosolvents.
 
         :param analysis_selection_string: MD Analysis selection string if want to generate densities only for specific molecules, defaults to ""
         :type analysis_selection_string: str, optional
