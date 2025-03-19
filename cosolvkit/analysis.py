@@ -18,7 +18,7 @@ from scipy.interpolate import RegularGridInterpolator
 from gridData import Grid
 
 from MDAnalysis import Universe
-from MDAnalysis.analysis import rdf, align
+from MDAnalysis.analysis import rdf, align, rms
 from MDAnalysis.analysis.base import AnalysisBase
 from MDAnalysis.analysis.rms import RMSF
 from waterdynamics import SurvivalProbability as SP
@@ -26,7 +26,7 @@ from waterdynamics import SurvivalProbability as SP
 import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_style("whitegrid")
-sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 3})
 
 from pymol import cmd
 from cosolvkit.cosolvent_system import CosolventMolecule
@@ -360,12 +360,30 @@ class Report:
 
         fig, ax = plt.subplots()
         ax.plot(rmsf_df['residue'], rmsf_df['RMSF'])
-        ax.set_xlabel('Residue');        ax.set_ylabel('RMSF')
-        ax.set_title('RMSF of the protein residues')
+        ax.set_xlabel('Residue');        ax.set_ylabel('RMSF (A)')
+        ax.set_title('RMSF by residue')
         plt.tight_layout()
         plt.savefig(os.path.join(self.out_path, "rmsf_by_residue.png"))
         plt.close()
         return
+    
+    def _plot_rmsd(self, rmsd_df, avg_selection):
+        """Plots the RMSD of the protein residues.
+
+        :param rmsd_df: dataframe with the RMSD data per frame.
+        :type rmsd_df: pd.DataFrame
+        :param avg_selection: selection string to average the trajectory.
+        :type avg_selection: str
+        """
+        fig, ax = plt.subplots()
+        ax.plot(rmsd_df['Frame'], rmsd_df[avg_selection])
+        ax.set_xlabel('Frame');        ax.set_ylabel('RMSD (A)')
+        ax.set_title(f'RMSD to Avg Structure - {avg_selection}')
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.out_path, "rmsd_by_frame.png"))
+        plt.close()
+        return
+
 
     def _rmsf_analysis(self, avg_selection, align_selection):
         """Computes the RMSF of the protein residues. 
@@ -381,13 +399,21 @@ class Report:
         average = align.AverageStructure(self.universe, None,
                                         select=avg_selection,
                                         ).run()
-        #TODO use RMSD to align the trajectory to the average and get the rmsd as well.
-        # this is useful to assess convergence of the simulation
 
         u_avg = average.results.universe
-        aligner = align.AlignTraj(self.universe, u_avg, 
-                                  select=align_selection, in_memory=True).run()
-        
+
+        R = rms.RMSD(self.universe, u_avg,  
+                    select=align_selection,  
+                    groupselections=[avg_selection],
+                    ).run()
+
+        avg_selection = avg_selection + ' and not name H*' # remove hydrogens from the selection
+        rmsd_df = pd.DataFrame(R.rmsd,
+                  columns=['Frame', 'Time (ps)', align_selection, avg_selection])
+
+        rmsd_df.to_csv(os.path.join(self.out_path, "rmsd_by_frame.csv"))
+        self._plot_rmsd(rmsd_df, avg_selection)
+
         selection = self.universe.select_atoms(avg_selection)
         residues = selection.resids
         rmsf = RMSF(selection).run()
