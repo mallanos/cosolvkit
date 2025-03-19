@@ -229,12 +229,14 @@ class Analysis(AnalysisBase):
     :param AnalysisBase: Base MDAnalysis class
     :type AnalysisBase: AnalysisBase
     """
-    def __init__(self, atomgroup, gridsize=0.5, **kwargs):
+    def __init__(self, atomgroup, gridsize=0.375, **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
         if atomgroup.n_atoms == 0:
             print("Error: no atoms were selected.")
             sys.exit(1)
+
+        self._type_histograms = {}
 
         self._u = atomgroup.universe
         self._ag = atomgroup
@@ -260,26 +262,58 @@ class Analysis(AnalysisBase):
         self._box_size = np.mean(self._dimensions, axis=0)
         self._center = np.mean(self._centers, axis=0)
 
-        # Get all the positions
-        positions = self._get_positions()
-
         # Get grid edges and origin
         x, y, z = self._center
         sd = self._box_size / 2.
         hbins = np.round(self._box_size / self._gridsize).astype(int)
         self._edges = (np.linspace(0, self._box_size[0], num=hbins[0] + 1, endpoint=True) + (x - sd[0]),
-                       np.linspace(0, self._box_size[1], num=hbins[1] + 1, endpoint=True) + (y - sd[1]),
-                       np.linspace(0, self._box_size[2], num=hbins[2] + 1, endpoint=True) + (z - sd[2]))
+                    np.linspace(0, self._box_size[1], num=hbins[1] + 1, endpoint=True) + (y - sd[1]),
+                    np.linspace(0, self._box_size[2], num=hbins[2] + 1, endpoint=True) + (z - sd[2]))
         origin = (self._edges[0][0], self._edges[1][0], self._edges[2][0])
 
-        hist, edges = np.histogramdd(positions, bins=self._edges)
-        self._histogram = Grid(hist, origin=origin, delta=self._gridsize)
-        self._density = Grid(_grid_density(hist), origin=origin, delta=self._gridsize)
+        # Get positions and atom types
+        positions = self._get_positions()
+
+        # Get atom types for all frames
+        atom_types_array = np.tile(self._ag.atoms.types, self._nframes)
+
+        # Create per-type histograms
+        unique_types = np.unique(atom_types_array)
+        # Accoridng to rdkit naming convention, the first element is the atom type
+        unique_types = np.unique([a[0] for a in unique_types if a[0] != 'H'])  # Skip hydrogens
+        # print(f"Unique types: {unique_types}")
+
+        # self._type_histograms = {}  # Clear previous histograms to avoid conflicts
+
+        for atom_type in unique_types:
+            print(f"Processing atom type: {atom_type}")
+
+            # Get positions for this atom type
+            # Create a boolean mask to filter by atom type. this is superfast
+            mask = np.char.startswith(atom_types_array.astype(str), atom_type)
+
+            # Filter positions based on the mask
+            type_positions = positions[mask]
+
+            # Skip empty positions for a type
+            if len(type_positions) == 0:
+                print(f"Skipping atom type {atom_type} as it has no positions.")
+                continue
+
+            # Generate histogram for this type
+            hist, _ = np.histogramdd(type_positions, bins=self._edges)
+            self._type_histograms[atom_type] = Grid(hist, origin=origin, delta=self._gridsize)
+
+        # Create a combined density grid by summing all atom types
+        total_hist = sum(grid.grid for grid in self._type_histograms.values())
+        self._histogram = Grid(total_hist, origin=origin, delta=self._gridsize)
+        self._density = Grid(_grid_density(total_hist), origin=origin, delta=self._gridsize)
 
     def _get_positions(self, start=0, stop=None):
-        positions = self._positions[start:stop,:,:]
+        positions = self._positions[start:stop, :, :]
         new_shape = (positions.shape[0] * positions.shape[1], 3)
         positions = positions.reshape(new_shape)
+
         return positions
 
     def atomic_grid_free_energy(self, temperature=300., atom_radius=1.4, smoothing=True):
@@ -307,6 +341,13 @@ class Analysis(AnalysisBase):
         """ Export atomic grid free energy
         """
         _export(fname, self._agfe, gridsize, center, box_size)
+        
+    def export_type_density(self, fname, gridsize=0.5, center=None, box_size=None):
+        """Export per-atomtype density maps.
+        """
+        for atom_type, grid in self._type_histograms.items():
+            density_fname=fname.replace('ATOMTYPE', atom_type)
+            _export(density_fname, grid, gridsize, center, box_size)
 
 class Report:
     """Report class. This is the main class that takes care of post MD simulation processing and analysis.
@@ -657,13 +698,16 @@ class Report:
         """
         fig_density_name = os.path.join(self.out_path, f"map_density.dx")
         fig_energy_name =  os.path.join(self.out_path, f"map_agfe.dx")
+        fig_atomdensity_name =  os.path.join(self.out_path, f"density_ATOMTYPE.dx")
+
         if cosolvent_name is not None:
             fig_density_name = os.path.join(self.out_path, f"map_density_{cosolvent_name}.dx")
             fig_energy_name =  os.path.join(self.out_path, f"map_agfe_{cosolvent_name}.dx")
         analysis = Analysis(self.universe.select_atoms(selection_string), verbose=True)
         analysis.run()
-        analysis.atomic_grid_free_energy(temperature)
         analysis.export_density(fig_density_name)
+        analysis.export_type_density(fig_atomdensity_name)
+        analysis.atomic_grid_free_energy(temperature)
         analysis.export_atomic_grid_free_energy(fig_energy_name)
         self.density_file = fig_density_name
         return
