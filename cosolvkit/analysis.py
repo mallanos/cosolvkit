@@ -323,6 +323,8 @@ class Analysis(AnalysisBase):
     def _map_atomtypes(self, atomtypes_definitions:dict=None) -> np.ndarray:
         """Maps atom types to their respective categories based on SMARTS patterns.
         Some useful definitions here:  https://www.daylight.com/dayhtml_tutorials/languages/smarts/smarts_examples.html
+        :param atomtypes_definitions: Dictionary with atom types definitions based on SMARTS patterns.
+        :type atomtypes_definitions: dict
         :return: Array of mapped atom types.
         :rtype: np.ndarray
         """
