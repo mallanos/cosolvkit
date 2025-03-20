@@ -21,7 +21,6 @@ from MDAnalysis import Universe
 from MDAnalysis.analysis import rdf, align, rms
 from MDAnalysis.analysis.base import AnalysisBase
 from MDAnalysis.analysis.rms import RMSF
-from waterdynamics import SurvivalProbability as SP
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -476,7 +475,8 @@ class Report:
     def _survivalProbability_analysis(self, 
                                        cosolvent_names: list[str] = None,
                                        candidate_residues: list[tuple] = None, 
-                                       radius: float = 5, max_tau: int = 100
+                                       radius: float = 5, 
+                                       max_tau: int = 100
                                        ):
         """Computes the survival probability of the cosolvent around a spherical zone centered 
         at the COM of the candidate residues. Uses the waterdynamics package to compute the survival 
@@ -494,7 +494,11 @@ class Report:
         :param max_tau: maximum tau to analyze.
         :type max_tau: int
         """
-
+        try:
+            from waterdynamics import SurvivalProbability as SP
+        except ImportError:
+            raise ImportError("waterdynamics package is required for Survival Probability analysis. Please install it.")
+        
         for cosolvent_name in cosolvent_names:
             data = []
             for res_idx, residue_group in enumerate(candidate_residues):
