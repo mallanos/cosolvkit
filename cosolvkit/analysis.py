@@ -90,7 +90,7 @@ def entropy_corrected_free_energy(gfe, occupancy, lambda_factor=0.5, radius=2):
 
     return gfe_corrected
 
-def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correction=True):
+def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correction=False):
     """
     Compute the atomic grid free energy (GFE) from a given histogram.
     
@@ -101,7 +101,8 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correct
     :param entropy_correction: Apply entropy correction to the free energy map (default False)
     :return: 3D numpy array of free energy values (same shape as `hist`)
     """
-        
+
+    # FIXME: #44 for atomtype analysis Im not sure if we need to use the all cosolvent atoms to calculate the volume    
     # Before the volume_water was calculated as the total volume of the box, but it should be the volume of the solvent region
     # this approximation is not correct, but it is a good starting point
     n_accessible_voxels = np.sum(hist > 0)  # Count nonzero occupancy voxels
@@ -148,21 +149,21 @@ def _smooth_grid_free_energy(gfe,
     gfe_filtered = np.copy(gfe)
 
     # the energy cutoff is applied before smoothing, 
-    # gfe_filtered[gfe_filtered >= energy_cutoff] = 0.0
+    gfe_filtered[gfe_filtered >= energy_cutoff] = 0.0
 
     # Apply Gaussian smoothing AFTER filtering (not sure if this is the best approach)
     gfe_smoothed = gaussian_filter(gfe_filtered, sigma=sigma)
     # print(f'Energy cutoff is: {energy_cutoff}')
 
     # Keep only favorable energy values after smoothing
-    gfe_smoothed[gfe_smoothed >= energy_cutoff] = 0.0
+    # gfe_smoothed[gfe_smoothed >= energy_cutoff] = 0.0
 
     print(f'Min gfe_smoothed: {np.min(gfe_smoothed)}, Max gfe_smoothed: {np.max(gfe_smoothed)}')
 
     # Normalization has not no effect
-    # gfe_smoothed = _normalization(gfe_smoothed, np.min(gfe_smoothed), 0.0)
+    gfe_smoothed = _normalization(gfe_smoothed, np.min(gfe_filtered), 0.0)
 
-    # print(f'Min gfe_smooth_norm: {np.min(gfe_smoothed)}, Max gfe_smooth_norm: {np.max(gfe_smoothed)}')
+    print(f'Min gfe_smooth_norm: {np.min(gfe_smoothed)}, Max gfe_smooth_norm: {np.max(gfe_smoothed)}')
 
     return gfe_smoothed
 
@@ -319,15 +320,40 @@ class Analysis(AnalysisBase):
         return positions
 
     def atomic_grid_free_energy(self, temperature=300., atom_radius=1.4, smoothing=True):
-        """Compute grid free energy.
+        """Compute grid free energy by boltzmann inversion of the occupancy histogram at a given temperature.
+        Optionally, the free energy map can be smoothed using a Gaussian filter and some tricks.
+        
+        :param temperature: Temperature in Kelvin (default 300K)
+        :param atom_radius: Atomic radius for smoothing (default 1.4A)
+        :param smoothing: Apply smoothing to the free energy map (default True)
+
         """
-        agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
+        
+        if self.use_atomtypes:
+            for atom_type, grid in self._type_histograms.items():
+                agfe = _grid_free_energy(grid.grid, self._n_atoms, self._nframes, temperature)
 
-        if smoothing:
-            # We divide by 3 in order to have radius == 3 sigma
-            agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
+                if smoothing:
+                    # We divide by 3 in order to have radius == 3 sigma
+                    agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 2., energy_cutoff=0)
 
-        self._agfe = Grid(agfe, edges=self._histogram.edges)
+                self._type_histograms[atom_type] = Grid(agfe, edges=grid.edges)
+        else:
+            agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
+
+            if smoothing:
+                # We divide by 3 in order to have radius == 3 sigma
+                agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
+
+            self._agfe = Grid(agfe, edges=self._histogram.edges)
+
+        # agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
+
+        # if smoothing:
+        #     # We divide by 3 in order to have radius == 3 sigma
+        #     agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
+
+        # self._agfe = Grid(agfe, edges=self._histogram.edges)
 
     def export_histogram(self, fname, gridsize=0.5, center=None, box_size=None):
         """ Export histogram maps
@@ -345,9 +371,14 @@ class Analysis(AnalysisBase):
             _export(fname, self._density, gridsize, center, box_size)
 
     def export_atomic_grid_free_energy(self, fname, gridsize=0.5, center=None, box_size=None):
-        """ Export atomic grid free energy
+        """ Export atomic grid free energy, either for the total free energy or for each atom type
         """
-        _export(fname, self._agfe, gridsize, center, box_size)
+        if self.use_atomtypes:
+            for atom_type, grid in self._type_histograms.items():
+                gfe_fname=fname.replace('map_agfe', f'map_agfe_{atom_type}')
+                _export(gfe_fname, grid, gridsize, center, box_size)
+        else:
+            _export(fname, self._agfe, gridsize, center, box_size)
         
 class Report:
     """Report class. This is the main class that takes care of post MD simulation processing and analysis.
@@ -513,7 +544,7 @@ class Report:
 
                 sp = SP(self.universe, select, verbose=True)
                 # The default intermittency is continuous (0).
-                sp.run(tau_max=max_tau, residues=False, intermittency=0)
+                sp.run(tau_max=max_tau, residues=False, intermittency=1)
 
                 for tau, sp_value in zip(sp.tau_timeseries,  sp.sp_timeseries):
                         data.append({'Group': res_idx, 'Residues':residue_group, 
