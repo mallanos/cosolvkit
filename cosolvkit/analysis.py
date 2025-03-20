@@ -229,7 +229,7 @@ class Analysis(AnalysisBase):
     :param AnalysisBase: Base MDAnalysis class
     :type AnalysisBase: AnalysisBase
     """
-    def __init__(self, atomgroup, gridsize=0.5, use_atomtypes:bool=True, **kwargs):
+    def __init__(self, atomgroup, gridsize:float=0.5, use_atomtypes:bool=True, atomtypes_definitions:dict=None, **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
         if atomgroup.n_atoms == 0:
@@ -244,6 +244,7 @@ class Analysis(AnalysisBase):
         self._center = None
         self._box_size = None
         self.use_atomtypes = use_atomtypes
+        self.atomtypes_definitions = atomtypes_definitions
 
     def _prepare(self):
         self._positions = []
@@ -274,24 +275,24 @@ class Analysis(AnalysisBase):
         # Get positions and atom types
         positions = self._get_positions()
 
-        # turn on for atomtype density
-        if self.use_atomtypes:
+        if self.use_atomtypes: # turn on for atomtype density
             self._type_histograms = {}  # Create per-type histograms
-            # Accoridng to rdkit naming convention, the first element is the atom type
-            unique_types = np.unique(self._ag.atoms.types)
-            unique_types = np.unique([a[0] for a in unique_types if a[0] != 'H'])  # Skip hydrogens
-            # print(f"The following unique types will be analyzed: {unique_types}")
-            # Get atom types for all frames
-            atom_types_array = np.tile(self._ag.atoms.types, self._nframes)
 
-            for atom_type in unique_types:
+            # Map atom types to atoms in the system
+            mapped_atomtypes = self._map_atomtypes(self.atomtypes_definitions)
+
+            # Get atom types for all frames as a single array
+            atom_types_array = np.tile(mapped_atomtypes, self._nframes)
+
+            for atom_type in self.atomtypes_dict.keys():
+                if atom_type == 'OTHER':
+                    continue
+
                 print(f"Processing atom type: {atom_type}")
 
-                # Get positions for this atom type
-                # Create a boolean mask to filter by atom type. this is superfast
+                # Select positions for this atom type
                 mask = np.char.startswith(atom_types_array.astype(str), atom_type)
 
-                # Filter positions based on the mask
                 type_positions = positions[mask]
 
                 # Skip empty positions for a type
@@ -319,6 +320,40 @@ class Analysis(AnalysisBase):
 
         return positions
 
+    def _map_atomtypes(self, atomtypes_definitions:dict=None) -> np.ndarray:
+        """Maps atom types to their respective categories based on SMARTS patterns.
+        Some useful definitions here:  https://www.daylight.com/dayhtml_tutorials/languages/smarts/smarts_examples.html
+        :return: Array of mapped atom types.
+        :rtype: np.ndarray
+        """
+
+        if atomtypes_definitions is None:
+            # Define atomtypes to analyze based on SMARTs patterns
+            self.atomtypes_definitions = {
+                            'HBD':'[!$([#6,H0,-,-2,-3])]', #A H-bond donor is a non-negatively charged heteroatom with at least one H
+                            'HBA':'[!$([#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]', #A H-bond acceptor is a heteroatom with no positive charge, note that negatively charged oxygen or sulphur are included. 
+                            'ARO':'[c]'
+                            }
+        
+        # select atoms based on SMARTS patterns
+        # usually we don't want to include hydrogens in the analysis
+        self.atomtypes_dict = {key: self._ag.select_atoms(f'smarts {smarts} and not name H*') for key, smarts in self.atomtypes_definitions.items()}
+        self.atomtypes_dict = {key: np.unique(ag.atoms.types) for key, ag in self.atomtypes_dict.items()}
+        # print(f"Unique atom types in the selection: {self.atomtypes_dict}")
+
+        mapped_atomtypes = np.zeros_like(self._ag.atoms.types, dtype=object)
+
+        # Map atom types to their respective categories
+        for atom in self._ag.atoms.types:
+            for key, atomtypes in self.atomtypes_dict.items():
+                if atom in atomtypes:
+                    mapped_atomtypes[np.where(self._ag.atoms.types == atom)] = key
+                    break
+            else:
+                mapped_atomtypes[np.where(self._ag.atoms.types == atom)] = 'OTHER'
+
+        return mapped_atomtypes
+    
     def atomic_grid_free_energy(self, temperature=300., atom_radius=1.4, smoothing=True):
         """Compute grid free energy by boltzmann inversion of the occupancy histogram at a given temperature.
         Optionally, the free energy map can be smoothed using a Gaussian filter and some tricks.
@@ -334,7 +369,6 @@ class Analysis(AnalysisBase):
                 agfe = _grid_free_energy(grid.grid, self._n_atoms, self._nframes, temperature)
 
                 if smoothing:
-                    # We divide by 3 in order to have radius == 3 sigma
                     agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 2., energy_cutoff=0)
 
                 self._type_histograms[atom_type] = Grid(agfe, edges=grid.edges)
@@ -347,13 +381,7 @@ class Analysis(AnalysisBase):
 
             self._agfe = Grid(agfe, edges=self._histogram.edges)
 
-        # agfe = _grid_free_energy(self._histogram.grid, self._n_atoms, self._nframes, temperature)
-
-        # if smoothing:
-        #     # We divide by 3 in order to have radius == 3 sigma
-        #     agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
-
-        # self._agfe = Grid(agfe, edges=self._histogram.edges)
+        return
 
     def export_histogram(self, fname, gridsize=0.5, center=None, box_size=None):
         """ Export histogram maps
