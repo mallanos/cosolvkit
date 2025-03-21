@@ -680,95 +680,6 @@ class Report:
 
         return
     
-    def generate_pymol_reports(self, 
-                               density_files:list[str]=None, 
-                               selection_string:str=None, 
-                               reference_pdb:str=None):
-        """Generate the PyMol reports from the density maps. The average structure is always used as a reference. 
-        You can also include a reference pdb file and specify the residues of interest. 
-
-        :param reference_pdb: reference pdb file to load in PyMol.
-        :type reference_pdb: str
-        :param density_files: list of density files to include in the same PyMol session. Limited to 5.
-        :type density_files: list
-        :param selection_string: PyMol selection string if willing to specify target residues.
-        :type selection_string: str
-        """
-        colors = ['marine', 
-                  'orange', 
-                  'magenta',
-                  'salmon',
-                  'purple']
-
-        assert len(density_files) <= len(colors), "Error! Too many density files, not enough colors available!"
-        
-        if not os.path.exists(self.avg_pdb_path):
-            # if the average pdb was not generated in the report, we generate it here
-            self._rmsf_analysis(avg_selection='protein')
-
-        structures = {'average_structure': self.avg_pdb_path}
-        if reference_pdb is not None and reference_pdb.endswith('.pdb'):
-            reference_pdb_name = os.path.basename(reference_pdb).split('.')[0]
-            structures[reference_pdb_name] = reference_pdb
-
-        cmd_string = ""
-
-        for structure_name, pdb_path in structures.items():
-
-            # Load topology and first frame of the trajectory
-            cmd.load(pdb_path, structure_name)
-            cmd_string += f"cmd.load('{pdb_path}', {structure_name})\n"
-
-            # Set structure's color
-            cmd.color("grey50", f"{structure_name} and name C*")
-            cmd_string += f"cmd.color('grey50', '{structure_name} and name C*')\n"
-
-        for color, density in zip(colors, density_files):
-            dens_name = os.path.basename(density).split('.')[0]
-            # print(f"Loading density map: {dens_name}")
-
-            dx_data = Grid(density)
-            # calculate 0.001 quantile. This works for agfe maps
-            dx_01 = np.quantile(dx_data.grid, 0.001)
-            # print(f"0.1% of the density map is: {dx_01}")
-
-            cmd.load(density, f'{dens_name}_map')
-            cmd_string += f"cmd.load('{density}', '{dens_name}_map')\n"
-
-            # Create isomesh for hydrogen bond probes
-            cmd.isomesh(f'{dens_name}_mesh', f'{dens_name}_map', dx_01)
-            cmd_string += f"cmd.isomesh('{dens_name}_mesh', '{dens_name}_map', {dx_01})\n"
-
-            # Color the hydrogen bond isomesh
-            cmd.color(color, f'{dens_name}_mesh')
-            cmd_string += f"cmd.color('{colors}', '{dens_name}_mesh')\n"
-            
-        # Show sticks for the residues of interest
-        if selection_string != '':
-            cmd.show("sticks", selection_string)
-            cmd_string += f"cmd.show('sticks', '{selection_string}')\n"
-
-        cmd.hide("spheres")
-        # Set valence to 0 - no double bonds
-        # cmd.set("valence", 0)
-        cmd.set('specular', 1)
-        # Set cartoon_side_chain_helper to 1 - less messy
-        cmd.set("cartoon_side_chain_helper", 1)
-        # Set background color
-        cmd.bg_color("white") #grey80
-
-        cmd_string += "cmd.hide('spheres')\n"
-        # cmd_string += "cmd.set('valence', 0)\n"
-        cmd_string += "cmd.set('specular', 1)\n"
-        cmd_string += "cmd.set('cartoon_side_chain_helper', 1)\n"
-        cmd_string += "cmd.bg_color('white')"
-        
-        with open(os.path.join(self.out_path, "pymol_session_cmd.pml"), "w") as fo:
-            fo.write(cmd_string)
-            
-        cmd.save(os.path.join(self.out_path, "pymol_results_session.pse"))
-        return
-
     def _get_temp_vol_pot(self, log_file):
         """Returns temperature, volume and potential energy of the system during the MD simulation.
 
@@ -958,3 +869,92 @@ class Report:
         for item in leg.legendHandles:
             item.set_visible(False)
         return ax
+    
+    def generate_pymol_session(self, 
+                               density_files:list[str]=None, 
+                               selection_string:str=None, 
+                               reference_pdb:str=None):
+        """Generate a PyMol session from the density maps. The average structure is always used as a reference. 
+        You can also include a reference pdb file and specify the residues of interest. 
+
+        :param reference_pdb: reference pdb file to load in PyMol.
+        :type reference_pdb: str
+        :param density_files: list of density files to include in the same PyMol session. Limited to 5.
+        :type density_files: list
+        :param selection_string: PyMol selection string if willing to specify target residues.
+        :type selection_string: str
+        """
+        colors = ['marine', 
+                  'orange', 
+                  'magenta',
+                  'salmon',
+                  'purple']
+
+        assert len(density_files) <= len(colors), "Error! Too many density files, not enough colors available!"
+        
+        if not os.path.exists(self.avg_pdb_path):
+            # if the average pdb was not generated in the report, we generate it here
+            self._rmsf_analysis(avg_selection='protein')
+
+        structures = {'average_structure': self.avg_pdb_path}
+        if reference_pdb is not None and reference_pdb.endswith('.pdb'):
+            reference_pdb_name = os.path.basename(reference_pdb).split('.')[0]
+            structures[reference_pdb_name] = reference_pdb
+
+        cmd_string = ""
+
+        for structure_name, pdb_path in structures.items():
+
+            # Load topology and first frame of the trajectory
+            cmd.load(pdb_path, structure_name)
+            cmd_string += f"cmd.load('{pdb_path}', {structure_name})\n"
+
+            # Set structure's color
+            cmd.color("grey50", f"{structure_name} and name C*")
+            cmd_string += f"cmd.color('grey50', '{structure_name} and name C*')\n"
+
+        for color, density in zip(colors, density_files):
+            dens_name = os.path.basename(density).split('.')[0]
+            # print(f"Loading density map: {dens_name}")
+
+            dx_data = Grid(density)
+            # calculate 0.001 quantile. This works for agfe maps
+            dx_01 = np.quantile(dx_data.grid, 0.001)
+            # print(f"0.1% of the density map is: {dx_01}")
+
+            cmd.load(density, f'{dens_name}_map')
+            cmd_string += f"cmd.load('{density}', '{dens_name}_map')\n"
+
+            # Create isomesh for hydrogen bond probes
+            cmd.isomesh(f'{dens_name}_mesh', f'{dens_name}_map', dx_01)
+            cmd_string += f"cmd.isomesh('{dens_name}_mesh', '{dens_name}_map', {dx_01})\n"
+
+            # Color the hydrogen bond isomesh
+            cmd.color(color, f'{dens_name}_mesh')
+            cmd_string += f"cmd.color('{colors}', '{dens_name}_mesh')\n"
+            
+        # Show sticks for the residues of interest
+        if selection_string != '':
+            cmd.show("sticks", selection_string)
+            cmd_string += f"cmd.show('sticks', '{selection_string}')\n"
+
+        cmd.hide("spheres")
+        # Set valence to 0 - no double bonds
+        # cmd.set("valence", 0)
+        cmd.set('specular', 1)
+        # Set cartoon_side_chain_helper to 1 - less messy
+        cmd.set("cartoon_side_chain_helper", 1)
+        # Set background color
+        cmd.bg_color("white") #grey80
+
+        cmd_string += "cmd.hide('spheres')\n"
+        # cmd_string += "cmd.set('valence', 0)\n"
+        cmd_string += "cmd.set('specular', 1)\n"
+        cmd_string += "cmd.set('cartoon_side_chain_helper', 1)\n"
+        cmd_string += "cmd.bg_color('white')"
+        
+        with open(os.path.join(self.out_path, "pymol_session_cmd.pml"), "w") as fo:
+            fo.write(cmd_string)
+            
+        cmd.save(os.path.join(self.out_path, "pymol_results_session.pse"))
+        return
