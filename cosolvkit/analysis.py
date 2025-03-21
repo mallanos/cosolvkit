@@ -232,10 +232,6 @@ class Analysis(AnalysisBase):
     def __init__(self, atomgroup, gridsize:float=0.5, use_atomtypes:bool=True, atomtypes_definitions:dict=None, **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
-        if atomgroup.n_atoms == 0:
-            print("Error: no atoms were selected.")
-            sys.exit(1)
-
         self._u = atomgroup.universe
         self._ag = atomgroup
         self._gridsize = gridsize
@@ -639,34 +635,38 @@ class Report:
             self._survivalProbability_analysis(sp_cosolvent_names, sp_residues)
         return
     
-    def generate_density_maps(self, use_atomtypes:bool=True, temperature:float=None, analysis_selection_string=""):
-        """Generates the density maps for the target cosolvents.
-        :param use_atomtypes: if True, the density maps will be generated for each atom type, defaults to True
-        :type use_atomtypes: bool, optional
-        :param temperature: temperature of the system, defaults to None
-        :type temperature: float, optional
-        :param analysis_selection_string: MD Analysis selection string if want to generate densities only for specific molecules, defaults to ""
-        :type analysis_selection_string: str, optional
+    def generate_density_maps(self, 
+                              cosolvent_names:list[str]=None,
+                              use_atomtypes:bool=True,
+                              atomtypes_definitions:dict=None, 
+                              temperature:float=None, 
+                              ):
+        """Generates the density maps for all the cosolvents especified.
+
         """
         print("Generating density maps...")
+
+        if cosolvent_names is None or len(cosolvent_names) == 0:
+            print("No cosolvents specified for the density analysis. Skipping...")
+            return
 
         if temperature is None: # If temperature is not passed, so we take the last one from statistics
             temperature = self._temperature[-1]
 
-        if analysis_selection_string == "":
-            print("No cosolvent specified for the densities analysis. Generating a density map for each cosolvent.")
-            for cosolvent in self.cosolvents:
-                selection_string = f"resname {cosolvent.resname}"
-                self._run_analysis(selection_string=selection_string,
-                                   temperature=temperature,
-                                   use_atomtypes=use_atomtypes,
-                                   cosolvent_name=cosolvent.resname)
-        else:
-            print(f"Generating density maps for the following selection string: {analysis_selection_string}")
-            self._run_analysis(selection_string=analysis_selection_string, 
-                               temperature=temperature,
-                               use_atomtypes=use_atomtypes,
-                               cosolvent_name=None)
+        for cosolvent in cosolvent_names:
+            atomgroup = self.universe.select_atoms(f"resname {cosolvent}")
+            if atomgroup.n_atoms == 0:
+                print("Error: no atoms were selected.")
+                sys.exit(1)
+
+            analysis = Analysis(atomgroup, use_atomtypes=use_atomtypes, 
+                                atomtypes_definitions=atomtypes_definitions, 
+                                verbose=True)
+            analysis.run()
+            analysis.export_density(os.path.join(self.out_path, f"map_density_{cosolvent}.dx"))
+            analysis.atomic_grid_free_energy(temperature, smoothing=True)
+            analysis.export_atomic_grid_free_energy(os.path.join(self.out_path, f"map_agfe_{cosolvent}.dx"))
+
         return
     
     def generate_pymol_reports(self, density_files:list[str]=None, 
@@ -757,32 +757,31 @@ class Report:
         cmd.save(os.path.join(self.out_path, "pymol_results_session.pse"))
         return
 
-    def _run_analysis(self, selection_string, temperature, use_atomtypes, cosolvent_name=None):
-        """Creates Analysis object and generates densities.
+    # def _run_analysis(self, selection_string, temperature, use_atomtypes, cosolvent_name=None):
+    #     """Creates Analysis object and generates densities.
 
-        :param selection_string: MD Analysis selection string.
-        :type selection_string: str
-        :param temperature: temperature of the system.
-        :type temperature: float
-        :param use_atomtypes: if True, the density maps will be generated for each atom type.
-        :type use_atomtypes: bool
-        :param cosolvent_name: name of the cosolvent if not analysing all the cosolvents in the system, defaults to None
-        :type cosolvent_name: str, optional
-        """
-        fig_density_name = os.path.join(self.out_path, f"map_density.dx")
-        fig_energy_name =  os.path.join(self.out_path, f"map_agfe.dx")
-        # fig_atomdensity_name =  os.path.join(self.out_path, f"density_ATOMTYPE.dx")
+    #     :param selection_string: MD Analysis selection string.
+    #     :type selection_string: str
+    #     :param temperature: temperature of the system.
+    #     :type temperature: float
+    #     :param use_atomtypes: if True, the density maps will be generated for each atom type.
+    #     :type use_atomtypes: bool
+    #     :param cosolvent_name: name of the cosolvent if not analysing all the cosolvents in the system, defaults to None
+    #     :type cosolvent_name: str, optional
+    #     """
+    #     fig_density_name = os.path.join(self.out_path, f"map_density.dx")
+    #     fig_energy_name =  os.path.join(self.out_path, f"map_agfe.dx")
 
-        if cosolvent_name is not None:
-            fig_density_name = os.path.join(self.out_path, f"map_density_{cosolvent_name}.dx")
-            fig_energy_name =  os.path.join(self.out_path, f"map_agfe_{cosolvent_name}.dx")
-        analysis = Analysis(self.universe.select_atoms(selection_string), use_atomtypes=use_atomtypes, verbose=True)
-        analysis.run()
-        analysis.export_density(fig_density_name)
-        analysis.atomic_grid_free_energy(temperature)
-        analysis.export_atomic_grid_free_energy(fig_energy_name)
-        self.density_file = fig_density_name
-        return
+    #     if cosolvent_name is not None:
+    #         fig_density_name = os.path.join(self.out_path, f"map_density_{cosolvent_name}.dx")
+    #         fig_energy_name =  os.path.join(self.out_path, f"map_agfe_{cosolvent_name}.dx")
+    #     analysis = Analysis(self.universe.select_atoms(selection_string), use_atomtypes=use_atomtypes, verbose=True)
+    #     analysis.run()
+    #     analysis.export_density(fig_density_name)
+    #     analysis.atomic_grid_free_energy(temperature)
+    #     analysis.export_atomic_grid_free_energy(fig_energy_name)
+    #     self.density_file = fig_density_name
+    #     return
 
     def _get_temp_vol_pot(self, log_file):
         """Returns temperature, volume and potential energy of the system during the MD simulation.
