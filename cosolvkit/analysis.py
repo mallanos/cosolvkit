@@ -944,6 +944,8 @@ class Report:
         cmd.set('specular', 1)
         # Set cartoon_side_chain_helper to 1 - less messy
         cmd.set("cartoon_side_chain_helper", 1)
+        # color protein by b-factor
+        cmd.spectrum("b", "blue_white_red", selection_string)
         # Set background color
         cmd.bg_color("white") #grey80
 
@@ -951,6 +953,7 @@ class Report:
         # cmd_string += "cmd.set('valence', 0)\n"
         cmd_string += "cmd.set('specular', 1)\n"
         cmd_string += "cmd.set('cartoon_side_chain_helper', 1)\n"
+        cmd_string += f"cmd.spectrum('b', 'blue_white_red', '{selection_string}')\n"
         cmd_string += "cmd.bg_color('white')"
         
         with open(os.path.join(self.out_path, "pymol_session_cmd.pml"), "w") as fo:
