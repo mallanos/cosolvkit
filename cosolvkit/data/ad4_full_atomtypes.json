@@ -1,0 +1,26 @@
+{"ad4_full": [
+    {"atype": "HD", "smarts": "[#1][#7,#8,#9,#15,#16]"},
+    {"atype": "B", "smarts": "[#5]"},
+    {"atype": "C", "smarts": "[C]"},
+    {"atype": "A", "smarts": "[c]"},
+    {"atype": "NA", "smarts": "[#7]"},
+    {"atype": "OA", "smarts": "[#8]"},
+    {"atype": "F", "smarts": "[#9]"},
+    {"atype": "Mg", "smarts": "[#12]"},
+    {"atype": "Si", "smarts": "[#14]"},
+    {"atype": "P", "smarts": "[#15]"},
+    {"atype": "S", "smarts": "[#16]"},
+    {"atype": "Cl", "smarts": "[#17]"},
+    {"atype": "Ca", "smarts": "[#20]"},
+    {"atype": "Mn", "smarts": "[#25]"},
+    {"atype": "Fe", "smarts": "[#26]"},
+    {"atype": "Zn", "smarts": "[#30]"},
+    {"atype": "Br", "smarts": "[#35]"},
+    {"atype": "I", "smarts": "[#53]"},
+    {"atype": "N", "smarts": "[#7X3v3][a]", "comment": "pyrrole, aniline"},
+    {"atype": "N", "smarts": "[#7X3v3][#6X3v4]", "comment": "amide"},
+    {"atype": "N", "smarts": "[#7X3v3][NX2]=[*]", "comment": "triazene"},
+    {"atype": "N", "smarts": "[#7+1]", "comment": "ammonium, pyridinium"},
+    {"atype": "SA", "smarts": "[SX2]", "comment": "sulfur acceptor"}
+    ]
+}

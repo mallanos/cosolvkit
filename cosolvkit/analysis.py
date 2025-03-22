@@ -229,7 +229,11 @@ class Analysis(AnalysisBase):
     :param AnalysisBase: Base MDAnalysis class
     :type AnalysisBase: AnalysisBase
     """
-    def __init__(self, atomgroup, gridsize:float=0.5, use_atomtypes:bool=True, atomtypes_definitions:dict=None, **kwargs):
+    def __init__(self, atomgroup,
+                        gridsize:float=0.5, 
+                        use_atomtypes:bool=True, 
+                        atomtypes_definitions:dict=None, 
+                        **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
         if atomgroup.n_atoms == 0:
@@ -244,7 +248,9 @@ class Analysis(AnalysisBase):
         self._center = None
         self._box_size = None
         self.use_atomtypes = use_atomtypes
-        self.atomtypes_definitions = atomtypes_definitions
+        self.atomtypes_definitions = None
+        if use_atomtypes:
+            self.atomtypes_definitions = self._load_atomtype_definitions(atomtypes_definitions)
 
     def _prepare(self):
         self._positions = []
@@ -319,27 +325,39 @@ class Analysis(AnalysisBase):
         positions = positions.reshape(new_shape)
 
         return positions
+        
+    def _load_atomtype_definitions(self, atomtypes_definitions:str=None) -> list:
+        """Loads atom type definitions from a json file.
+        :param atomtypes_definitions: Path to the json file with atom type definitions.
+        :type atomtypes_definitions: str
+        :return: A list of atom types definitions based on SMARTS patterns.
+        :rtype: list
+        """
+        if (atomtypes_definitions is None) or (not os.path.exists(atomtypes_definitions)):
+            print("Please provide a valid path to the atom types definitions JSON file.")
+            sys.exit(1)
+        
+        with open(atomtypes_definitions) as fi:
+            data = json.load(fi)
+            typer_name = next(iter(data))
+            atomtypes_definitions = data[typer_name]
+            print(f"Loaded {typer_name} atom types definitions.")
 
-    def _map_atomtypes(self, atomtypes_definitions:dict=None) -> np.ndarray:
+        return atomtypes_definitions
+            
+    
+    def _map_atomtypes(self, atomtypes_definitions:list=None) -> np.ndarray:
         """Maps atom types to their respective categories based on SMARTS patterns.
         Some useful definitions here:  https://www.daylight.com/dayhtml_tutorials/languages/smarts/smarts_examples.html
-        :param atomtypes_definitions: Dictionary with atom types definitions based on SMARTS patterns.
-        :type atomtypes_definitions: dict
+        :param atomtypes_definitions: A list of atom types definitions based on SMARTS patterns.
+        :type atomtypes_definitions: list
         :return: Array of mapped atom types.
         :rtype: np.ndarray
         """
-
-        if atomtypes_definitions is None:
-            # Define atomtypes to analyze based on SMARTs patterns
-            self.atomtypes_definitions = {
-                            'HBD':'[!$([#6,H0,-,-2,-3])]', #A H-bond donor is a non-negatively charged heteroatom with at least one H
-                            'HBA':'[!$([#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]', #A H-bond acceptor is a heteroatom with no positive charge, note that negatively charged oxygen or sulphur are included. 
-                            'ARO':'[c]'
-                            }
         
         # select atoms based on SMARTS patterns
         # usually we don't want to include hydrogens in the analysis
-        self.atomtypes_dict = {key: self._ag.select_atoms(f'smarts {smarts} and not name H*') for key, smarts in self.atomtypes_definitions.items()}
+        self.atomtypes_dict = {atomtype['atype']: self._ag.select_atoms(f"smarts {atomtype['smarts']} and not name H*") for atomtype in self.atomtypes_definitions}
         self.atomtypes_dict = {key: np.unique(ag.atoms.types) for key, ag in self.atomtypes_dict.items()}
         # print(f"Unique atom types in the selection: {self.atomtypes_dict}")
 
