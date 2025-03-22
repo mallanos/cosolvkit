@@ -222,7 +222,34 @@ def _export(fname, grid, gridsize=0.5, center=None, box_size=None):
         sub_grid = _subset_grid(grid, center, box_size, gridsize)
         sub_grid.export(fname)
 
+def _load_atomtype_definitions(atomtypes_fname:str=None) -> list:
+    """Loads atom type definitions from a json file.
+    :param atomtypes_fname: Path to the json file with atom type definitions.
+    :type atomtypes_fname: str
+    :return: A list of atom types definitions based on SMARTS patterns.
+    :rtype: list
+    """
+    DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
+    if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
+        print("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
+        try:
+            with open(DARC_default_location) as fi:
+                data = json.load(fi)
+                typer_name = next(iter(data))
+                atomtypes_definitions = data[typer_name]
+                print(f"Loaded {typer_name} atom types definitions.")
+        except FileNotFoundError:
+            print(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
+            sys.exit(1)
+    else:
+        with open(atomtypes_fname) as fi:
+            data = json.load(fi)
+            typer_name = next(iter(data))
+            atomtypes_definitions = data[typer_name]
+            print(f"Loaded {typer_name} atom types definitions.")
 
+    return atomtypes_definitions
+    
 class Analysis(AnalysisBase):
     """Analysis class to generate density grids
 
@@ -232,7 +259,7 @@ class Analysis(AnalysisBase):
     def __init__(self, atomgroup,
                         gridsize:float=0.5, 
                         use_atomtypes:bool=True, 
-                        atomtypes_fname:dict=None, 
+                        atomtypes_definitions:dict=None, 
                         **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
@@ -244,9 +271,11 @@ class Analysis(AnalysisBase):
         self._center = None
         self._box_size = None
         self.use_atomtypes = use_atomtypes
-        self.atomtypes_definitions = None
-        if use_atomtypes:
-            self.atomtypes_definitions = self._load_atomtype_definitions(atomtypes_fname)
+        self.atomtypes_definitions = atomtypes_definitions
+
+        if use_atomtypes and atomtypes_definitions is None:
+            print("Error: Atom types definitions are required for atom type density analysis.")
+            sys.exit(1)
 
     def _prepare(self):
         self._positions = []
@@ -320,37 +349,7 @@ class Analysis(AnalysisBase):
         new_shape = (positions.shape[0] * positions.shape[1], 3)
         positions = positions.reshape(new_shape)
 
-        return positions
-        
-    def _load_atomtype_definitions(self, atomtypes_fname:str=None) -> list:
-        """Loads atom type definitions from a json file.
-        :param atomtypes_fname: Path to the json file with atom type definitions.
-        :type atomtypes_fname: str
-        :return: A list of atom types definitions based on SMARTS patterns.
-        :rtype: list
-        """
-        DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
-        if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
-            print("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
-            try:
-                with open(DARC_default_location) as fi:
-                    data = json.load(fi)
-                    typer_name = next(iter(data))
-                    atomtypes_definitions = data[typer_name]
-                    print(f"Loaded {typer_name} atom types definitions.")
-            except FileNotFoundError:
-                print(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
-                sys.exit(1)
-        else:
-            print(atomtypes_definitions)
-            with open(atomtypes_definitions) as fi:
-                data = json.load(fi)
-                typer_name = next(iter(data))
-                atomtypes_definitions = data[typer_name]
-                print(f"Loaded {typer_name} atom types definitions.")
-
-        return atomtypes_definitions
-            
+        return positions           
     
     def _map_atomtypes(self, atomtypes_definitions:list=None) -> np.ndarray:
         """Maps atom types to their respective categories based on SMARTS patterns.
@@ -665,7 +664,7 @@ class Report:
     def generate_density_maps(self, 
                               cosolvent_names:list[str]=None,
                               use_atomtypes:bool=True,
-                              atomtypes_definitions:dict=None, 
+                              atomtypes_definitions:str=None, 
                               gridsize:float=0.5,
                               temperature:float=None, 
                               ):
@@ -675,8 +674,8 @@ class Report:
         :type cosolvent_names: list[str], optional
         :param use_atomtypes: if True, the density analysis will be performed using atomtypes, defaults to True
         :type use_atomtypes: bool, optional
-        :param atomtypes_definitions: dictionary with the atomtypes definitions, defaults to None
-        :type atomtypes_definitions: dict, optional
+        :param atomtypes_definitions: path to the json file with the atom types definitions, defaults to None
+        :type atomtypes_definitions: str, optional
         :param gridsize: gridsize to use for the analysis, defaults to 0.5
         :type gridsize: float, optional
         :param temperature: temperature to use for the analysis, defaults to None
@@ -693,10 +692,14 @@ class Report:
         if temperature is None: # If temperature is not passed, so we take the last one from statistics
             temperature = self._temperature[-1]
 
+        # load the atomtypes definitions
+        if use_atomtypes:
+            atomtypes_definitions = _load_atomtype_definitions(atomtypes_definitions)
+
         for cosolvent in cosolvent_names:
             atomgroup = self.universe.select_atoms(f"resname {cosolvent}")
             if atomgroup.n_atoms == 0:
-                print("Error: no atoms were selected.")
+                print("Error: the provided selection didn't match any atoms.")
                 sys.exit(1)
 
             analysis = Analysis(atomgroup, 
