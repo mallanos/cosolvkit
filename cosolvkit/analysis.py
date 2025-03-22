@@ -232,7 +232,7 @@ class Analysis(AnalysisBase):
     def __init__(self, atomgroup,
                         gridsize:float=0.5, 
                         use_atomtypes:bool=True, 
-                        atomtypes_definitions:dict=None, 
+                        atomtypes_fname:dict=None, 
                         **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
 
@@ -246,7 +246,7 @@ class Analysis(AnalysisBase):
         self.use_atomtypes = use_atomtypes
         self.atomtypes_definitions = None
         if use_atomtypes:
-            self.atomtypes_definitions = self._load_atomtype_definitions(atomtypes_definitions)
+            self.atomtypes_definitions = self._load_atomtype_definitions(atomtypes_fname)
 
     def _prepare(self):
         self._positions = []
@@ -322,22 +322,32 @@ class Analysis(AnalysisBase):
 
         return positions
         
-    def _load_atomtype_definitions(self, atomtypes_definitions:str=None) -> list:
+    def _load_atomtype_definitions(self, atomtypes_fname:str=None) -> list:
         """Loads atom type definitions from a json file.
-        :param atomtypes_definitions: Path to the json file with atom type definitions.
-        :type atomtypes_definitions: str
+        :param atomtypes_fname: Path to the json file with atom type definitions.
+        :type atomtypes_fname: str
         :return: A list of atom types definitions based on SMARTS patterns.
         :rtype: list
         """
-        if (atomtypes_definitions is None) or (not os.path.exists(atomtypes_definitions)):
-            print("Please provide a valid path to the atom types definitions JSON file.")
-            sys.exit(1)
-        
-        with open(atomtypes_definitions) as fi:
-            data = json.load(fi)
-            typer_name = next(iter(data))
-            atomtypes_definitions = data[typer_name]
-            print(f"Loaded {typer_name} atom types definitions.")
+        DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
+        if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
+            print("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
+            try:
+                with open(DARC_default_location) as fi:
+                    data = json.load(fi)
+                    typer_name = next(iter(data))
+                    atomtypes_definitions = data[typer_name]
+                    print(f"Loaded {typer_name} atom types definitions.")
+            except FileNotFoundError:
+                print(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
+                sys.exit(1)
+        else:
+            print(atomtypes_definitions)
+            with open(atomtypes_definitions) as fi:
+                data = json.load(fi)
+                typer_name = next(iter(data))
+                atomtypes_definitions = data[typer_name]
+                print(f"Loaded {typer_name} atom types definitions.")
 
         return atomtypes_definitions
             
@@ -353,7 +363,7 @@ class Analysis(AnalysisBase):
         
         # select atoms based on SMARTS patterns
         # usually we don't want to include hydrogens in the analysis
-        self.atomtypes_dict = {atomtype['atype']: self._ag.select_atoms(f"smarts {atomtype['smarts']} and not name H*") for atomtype in self.atomtypes_definitions}
+        self.atomtypes_dict = {atomtype['atype']: self._ag.select_atoms(f"smarts {atomtype['smarts']} and not name H*") for atomtype in atomtypes_definitions}
         self.atomtypes_dict = {key: np.unique(ag.atoms.types) for key, ag in self.atomtypes_dict.items()}
         # print(f"Unique atom types in the selection: {self.atomtypes_dict}")
 
@@ -446,7 +456,6 @@ class Report:
         self.topology = top_file
         self.universe = Universe(self.topology, self.trajectory)
 
-        # self.cosolvents = list()
         if cosolvent_names is None or len(cosolvent_names) == 0:
             print("No cosolvents specified for the density analysis. At least one cosolvent is required.")
             sys.exit(1)
