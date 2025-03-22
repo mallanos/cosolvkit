@@ -395,7 +395,7 @@ class Analysis(AnalysisBase):
                 agfe = _grid_free_energy(grid.grid, self._n_atoms, self._nframes, temperature)
 
                 if smoothing:
-                    agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 2., energy_cutoff=0)
+                    agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
 
                 self._type_histograms[atom_type] = Grid(agfe, edges=grid.edges)
         else:
@@ -666,6 +666,7 @@ class Report:
                               cosolvent_names:list[str]=None,
                               use_atomtypes:bool=True,
                               atomtypes_definitions:dict=None, 
+                              gridsize:float=0.5,
                               temperature:float=None, 
                               ):
         """Generates the density maps for all the cosolvents especified. It is possible to use atomtypes for the analysis.
@@ -676,6 +677,8 @@ class Report:
         :type use_atomtypes: bool, optional
         :param atomtypes_definitions: dictionary with the atomtypes definitions, defaults to None
         :type atomtypes_definitions: dict, optional
+        :param gridsize: gridsize to use for the analysis, defaults to 0.5
+        :type gridsize: float, optional
         :param temperature: temperature to use for the analysis, defaults to None
         :type temperature: float, optional
 
@@ -697,6 +700,7 @@ class Report:
                 sys.exit(1)
 
             analysis = Analysis(atomgroup, 
+                                gridsize=gridsize,
                                 use_atomtypes=use_atomtypes, 
                                 atomtypes_definitions=atomtypes_definitions, 
                                 verbose=True)
