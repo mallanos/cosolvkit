@@ -22,6 +22,7 @@ class Config(object):
                  solvent_smiles=None,
                  solvent_copies=None,
                  ligands= dict(),
+                 padding=None,
                  membrane=False,
                  lipid_type=None,
                  lipid_patch_path=None,
@@ -45,6 +46,7 @@ class Config(object):
         self.solvent_smiles = solvent_smiles
         self.solvent_copies = solvent_copies
         self.ligands = ligands
+        self.padding = padding
         self.membrane = membrane
         self.lipid_type = lipid_type
         self.lipid_patch_path = lipid_patch_path

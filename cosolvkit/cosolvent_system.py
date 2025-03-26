@@ -165,7 +165,7 @@ class CosolventSystem(object):
                  ligands: dict,
                  simulation_format: str, 
                  modeller: app.Modeller,  
-                 padding: openmmunit.Quantity = 12*openmmunit.angstrom, 
+                 padding: openmmunit.Quantity, 
                  radius: openmmunit.Quantity = None):
         """Create cosolvent system.
 
@@ -179,7 +179,7 @@ class CosolventSystem(object):
         :type simulation_format: str
         :param modeller: openmm modeller created from topology and positions.
         :type modeller: openmm.app.Modeller
-        :param padding: specifies the padding used to create the simulation box, defaults to 12*openmmunit.angstrom
+        :param padding: specifies the padding used to create the simulation box, defaults to 10 * openmmunit.angstrom
         :type padding: openmm.unit.Quantity, optional
         :param radius: Specifies the radius to create the box without receptor, defaults to None
         :type radius: openmm.unit.Quantity, optional
@@ -190,18 +190,18 @@ class CosolventSystem(object):
         self._box = None
         self._periodic_box_vectors = None
         self._box_volume = None
-        self._padding = padding
 
         # Public
         self.protein_radius = 3.5 * openmmunit.angstrom
-        self.cosolvents_radius = 2.5*openmmunit.angstrom
+        self.cosolvents_radius = 2.5 * openmmunit.angstrom
         self.modeller = None
         self.system = None
         self.modeller = None
         self.cosolvents = dict()
         self.radius = radius
         self.small_molecule_forcefield = forcefields["small_molecules"][0]
-
+        padding = padding * openmmunit.angstrom
+        
         assert (simulation_format.upper() in self._available_formats), f"Error! The simulation format supplied is not supported! Available simulation engines:\n\t{self._available_formats}"
         
         self.ligands = ligands
@@ -1274,7 +1274,7 @@ class CosolventMembraneSystem(CosolventSystem):
                  ligands: dict,
                  simulation_format: str, 
                  modeller: app.Modeller,  
-                 padding: openmmunit.Quantity = 12*openmmunit.angstrom, 
+                 padding: openmmunit.Quantity = 10 * openmmunit.angstrom, 
                  radius: openmmunit.Quantity = None,
                  lipid_type: str=None,
                  lipid_patch_path: str=None):
@@ -1308,7 +1308,7 @@ class CosolventMembraneSystem(CosolventSystem):
                          radius=radius)
         
         self.protein_raidus = 1.5 * openmmunit.angstrom
-        self.cosolvents_radius = 2.5*openmmunit.angstrom           
+        self.cosolvents_radius = 2.5 * openmmunit.angstrom           
         self.lipid_type = lipid_type
         self.lipid_patch = None
         

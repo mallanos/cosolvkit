@@ -12,6 +12,7 @@
   "solvent_smiles": "H2O",
   "solvent_copies": null,
   "ligands": {},
+  "padding": 10.0,
   "membrane": false,
   "lipid_type": "POPC",
   "lipid_patch_path": null,

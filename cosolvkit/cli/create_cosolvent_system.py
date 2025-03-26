@@ -120,10 +120,11 @@ def main():
                                                     ligands=config.ligands,
                                                     simulation_format=config.md_format,
                                                     modeller=protein_modeller,
+                                                    padding=config.padding,
                                                     radius=config.radius,
                                                     lipid_type=config.lipid_type,
                                                     lipid_patch_path=config.lipid_patch_path)
-            cosolv_system.add_membrane(cosolvent_placement=config.cosolvent_placement,
+            cosolv_system.add_membrane(cosolvent_placement=config.memb_cosolv_placement,
                                     waters_to_keep=config.waters_to_keep)
             cosolv_system.build(iteratively_adjust_copies=args.iteratively_adjust_copies)
         else:
@@ -132,6 +133,7 @@ def main():
                                             ligands=config.ligands,
                                             simulation_format=config.md_format,
                                             modeller=protein_modeller,
+                                            padding=config.padding,
                                             radius=config.radius)
             cosolv_system.build(solvent_smiles=config.solvent_smiles,
                                 n_solvent_molecules=config.solvent_copies,
