@@ -80,7 +80,7 @@ The main entry point of the script is the file `config.json` where all the neces
 |membrane                 | boolean | Flag indicating if the system has membranes or not. | FALSE | |
 |lipid_type               | string | If membrane is TRUE specify the lipid to use. Supported lipids: ["POPC", "POPE", "DLPC", "DLPE", "DMPC", "DOPC", "DPPC"] | "POPC" | |
 |lipid_patch_path         | string | If the lipid required is not in the available, it is possible to pass a pre-equilibrated patch of the lipid of interest. | no default | |
-|cosolvent_placement      | integer | Integer deciding on which side of the membrane to place the cosolvents. Available options: [0 -> no preference, 1 -> outside, -1 -> inside] | 0 | |
+|memb_cosolvent_placement      | string | Which side of the membrane to place the cosolvents. Available options: [both -> no preference, outside, inside] | both | |
 |waters_to_keep           | list | List of indices of waters of interest in a membrane system. | no default | |
 |radius                   | float | If no receptor, the radius is necessary to set the size of the simulation box. | no default | |
 |output_dir               | string | Path to where save the results. | no default | |
