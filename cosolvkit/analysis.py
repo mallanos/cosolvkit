@@ -592,12 +592,12 @@ class Report:
 
         return
 
-    def _survivalProbability_analysis(self, 
-                                       cosolvent_names: list[str] = None,
-                                       candidate_residues: list[tuple] = None, 
-                                       radius: float = 5, 
-                                       max_tau: int = 100
-                                       ):
+    def survivalProbability_analysis(self, 
+                                    cosolvent_names: list[str] = None,
+                                    candidate_residues: list[tuple] = None, 
+                                    radius: float = 5, 
+                                    max_tau: int = 100
+                                    ):
         """Computes the survival probability of the cosolvent around a spherical zone centered 
         at the COM of the candidate residues. Uses the waterdynamics package to compute the survival 
         probability. The results are saved in a csv file and a plot is generated.
@@ -619,6 +619,11 @@ class Report:
         except ImportError:
             raise ImportError("waterdynamics package is required for Survival Probability analysis. Please install it.")
         
+        assert candidate_residues is not None, "Error! You need to pass the residues to analyze for the survival probability."
+        if cosolvent_names is None:
+            print("No cosolvent specified for the survival probability analysis. Using all cosolvents...")
+            cosolvent_names = self.cosolvent_names
+
         for cosolvent_name in cosolvent_names:
             data = []
             for res_idx, residue_group in enumerate(candidate_residues):
@@ -658,11 +663,9 @@ class Report:
         return
 
     def generate_report(self, 
-                        equilibration:bool=True, rmsf:bool=True, rdf:bool=True, sp:bool=True,
+                        equilibration:bool=True, rmsf:bool=True, rdf:bool=True,
                         avg_selection:str="protein",
-                        align_selection:str="protein and name CA",
-                        sp_cosolvent_names: list[str]=None,
-                        sp_residues: list[tuple]=None,
+                        align_selection:str="protein and name CA"
                         ):
         """Creates the main plots for RDFs, autocorrelations and equilibration.
         :param equilibration: if True, the equilibration analysis will be performed, defaults to True
@@ -671,16 +674,10 @@ class Report:
         :type rmsf: bool, optional
         :param rdf: if True, the RDF analysis will be performed, defaults to True
         :type rdf: bool, optional
-        :param sp: if True, the survival probability analysis will be performed, defaults to True
-        :type sp: bool, optional
         :param avg_selection: selection string to average the trajectory, defaults to "protein". Change this if you have other molecules in the system or things like DNA/RNA.
         :type avg_selection: str, optional
         :param align_selection: selection string to align the trajectory to the average, defaults to "protein and name CA". Change this if you have other molecules in the system or things like DNA/RNA.
         :type align_selection: str, optional
-        :param sp_cosolvent_names: list of cosolvent names to analyze, defaults to None.
-        :type sp_cosolvent_names: list[str], optional
-        :param sp_residues: residues to analyze for the survival probability, defaults to None.
-        :type sp_residues: list[tuple], optional
         """
         print("Generating report...")
 
@@ -693,12 +690,7 @@ class Report:
             self._rmsf_analysis(avg_selection, align_selection)
         if rdf:
             self._rfd_analysis(self.universe, self.cosolvent_names)
-        if sp:
-            assert sp_residues is not None, "Error! You need to pass the residues to analyze for the survival probability."
-            if sp_cosolvent_names is None:
-                print("No cosolvent specified for the survival probability analysis. Using all cosolvents...")
-                sp_cosolvent_names = self.cosolvent_names
-            self._survivalProbability_analysis(sp_cosolvent_names, sp_residues)
+   
         return
     
     def generate_density_maps(self, 
