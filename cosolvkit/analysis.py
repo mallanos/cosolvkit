@@ -11,6 +11,7 @@ import sys
 import json
 import numpy as np
 import pandas as pd
+from typing import List
 
 from scipy.ndimage import gaussian_filter
 from scipy.signal import correlate
@@ -28,9 +29,44 @@ sns.set_style("whitegrid")
 sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 3})
 
 from pymol import cmd
-from cosolvkit.cosolvent_system import CosolventMolecule
+
 
 BOLTZMANN_CONSTANT_KB = 0.0019872041  # kcal/(mol*K)
+
+def _read_dx(filepath:str=None) -> Grid:
+    """Reads a .dx map using gridData.Grid."""
+    return Grid(str(filepath))
+
+def combine_dx_maps(filepaths: List[str] = None, method:str= 'mean', out_path:str='.') -> Grid:
+    """Combines multiple .dx map files into one using a specified method."""
+
+    grids = [_read_dx(path) for path in filepaths]
+
+    # Validate all grids match in shape. This is kinda clunky, but it works.
+    shape = grids[0].grid.shape
+    for g in grids:
+        if g.grid.shape != shape:
+            raise ValueError("All input maps must have the same shape.")
+
+    stacked = np.stack([g.grid for g in grids])
+
+    agg_fn = {
+        'mean': np.mean,
+        'max': np.max,
+        'min': np.min,
+        'sum': np.sum,
+        'median': np.median
+    }.get(method)
+
+    if agg_fn is None:
+        raise ValueError(f"Unsupported combination method: {method}")
+
+    combined_data = agg_fn(stacked, axis=0)
+    combined_grid = Grid(combined_data, grids[0].edges)
+
+    combined_grid.export(f'{out_path}/combined_{method}.dx')
+
+    return combined_grid
 
 def _normalization(data, a:float=None, b:float=None):
     """_summary_
@@ -712,7 +748,7 @@ class Report:
                                 atomtypes_definitions=atomtypes_definitions, 
                                 verbose=True)
             analysis.run()
-            analysis.export_density(os.path.join(self.out_path, f"map_density_{cosolvent}.dx"))
+            analysis.export_density(os.path.join(self.out_path, f"map_rawdensity_{cosolvent}.dx"))
             analysis.atomic_grid_free_energy(temperature, smoothing=True)
             analysis.export_atomic_grid_free_energy(os.path.join(self.out_path, f"map_agfe_{cosolvent}.dx"))
 
@@ -955,7 +991,7 @@ class Report:
             dens_name = os.path.basename(density).split('.')[0]
             # print(f"Loading density map: {dens_name}")
 
-            dx_data = Grid(density)
+            dx_data = _read_dx(density)
             # calculate 0.001 quantile. This works for agfe maps
             dx_01 = np.quantile(dx_data.grid, 0.001)
             # print(f"0.1% of the density map is: {dx_01}")
