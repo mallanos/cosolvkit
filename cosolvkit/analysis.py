@@ -722,7 +722,12 @@ class Report:
             return
 
         if temperature is None: # If temperature is not passed, so we take the last one from statistics
-            temperature = self._temperature[-1]
+            if self._temperature is None:
+                print("No temperature found. Please provide a temperature or a statistics file for the density analysis.")
+                sys.exit(1)
+            else:
+                print(f'No temperature provided. Using the last temperature from the statistics file: {self._temperature[-1]}')
+                temperature = self._temperature[-1]
 
         # load the atomtypes definitions
         if use_atomtypes:
