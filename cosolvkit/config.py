@@ -25,7 +25,7 @@ class Config(object):
                  membrane=False,
                  lipid_type=None,
                  lipid_patch_path=None,
-                 cosolvent_placement=0,
+                 memb_cosolv_placement='both',
                  waters_to_keep=list(),
                  radius=None,
                  output_dir=None,
@@ -48,7 +48,7 @@ class Config(object):
         self.membrane = membrane
         self.lipid_type = lipid_type
         self.lipid_patch_path = lipid_patch_path
-        self.cosolvent_placement = cosolvent_placement
+        self.memb_cosolv_placement = memb_cosolv_placement
         self.waters_to_keep = waters_to_keep
         self.radius = radius
         self.output_dir = output_dir

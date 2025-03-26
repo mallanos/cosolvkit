@@ -1322,14 +1322,14 @@ class CosolventMembraneSystem(CosolventSystem):
         else:
             raise MutuallyExclusiveParametersError("Error! <lipid_type> and <lipid_patch_path> are mutually exclusive parameters. Please pass just one of them.")
     
-    def add_membrane(self, cosolvent_placement: int=0, neutralize: bool=True, waters_to_keep: list=None):
+    def add_membrane(self, cosolvent_placement: str='both', neutralize: bool=True, waters_to_keep: list=None):
         """Create a membrane system
 
-        :param cosolvent_placement: determines on what side of the membrane will the cosolvents be placed, defaults to 0.
-                                    * -1: inside the membrane
-                                    * +1: outside the membrane
-                                    * 0: everywhere
-        :type cosolvent_placement: int, optional
+        :param cosolvent_placement: determines on what side of the membrane will the cosolvents be placed, defaults to both.
+                                    * inside: inside the membrane
+                                    * outside: outside the membrane
+                                    * both: everywhere
+        :type cosolvent_placement: str, optional
         :param neutralize: if neutralize the system when solvating the membrane, defaults to True
         :type neutralize: bool, optional
         :param waters_to_keep: a list of the indices of key waters that should not be deleted, defaults to None
@@ -1340,11 +1340,11 @@ class CosolventMembraneSystem(CosolventSystem):
         # OpenMM default
         padding = 1 * openmmunit.nanometer
         self._cosolvent_placement = cosolvent_placement
-        if self._cosolvent_placement == 0: print("No preference on what side of the membrane to place the cosolvents")
-        elif self._cosolvent_placement == 1: print("Placing cosolvent molecules outside of the membrane")
-        elif self._cosolvent_placement == -1: print("Placing cosolvent molecules inside the membrane")
+        if self._cosolvent_placement == 'both': print("No preference on what side of the membrane to place the cosolvents")
+        elif self._cosolvent_placement == 'outside': print("Placing cosolvent molecules outside of the membrane")
+        elif self._cosolvent_placement == 'inside': print("Placing cosolvent molecules inside the membrane")
         else: 
-            print("Error! Available options for <cosolvent_placement> are [0 -> no preference, 1 -> outside, -1 -> inside]")
+            print("Error! Available options for <cosolvent_placement> are ['both' -> no preference, 'outside' -> outside, 'inside' -> inside]")
             raise SystemError
         try:
             if self.lipid_type is not None:
@@ -1392,7 +1392,7 @@ class CosolventMembraneSystem(CosolventSystem):
         :param iteratively_adjust_copies: if True, the number of copies of each cosolvent will iteratively be reduced until a valid starting configuration is found
         :type iteratively_adjust_copies: bool, optional 
         """
-        if self._cosolvent_placement != 0:
+        if self._cosolvent_placement != 'both':
             lipid_positions = list()
             atoms = list(self.modeller.topology.atoms())
             positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)
@@ -1401,7 +1401,7 @@ class CosolventMembraneSystem(CosolventSystem):
                     lipid_positions.append(positions[i])
             minRange = min((pos[2] for pos in lipid_positions))
             maxRange = max((pos[2] for pos in lipid_positions))
-            if self._cosolvent_placement == -1:
+            if self._cosolvent_placement == 'inside':
                 upperBound = Vec3(self.upperBound[0], self.upperBound[1], minRange)
                 lowerBound = self.lowerBound
             else:

@@ -15,7 +15,7 @@
   "membrane": false,
   "lipid_type": "POPC",
   "lipid_patch_path": null,
-  "cosolvent_placement": 0,
+  "memb_cosolv_placement": "both",
   "waters_to_keep": [],
   "radius": null,
   "output_dir": "results",
