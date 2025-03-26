@@ -11,7 +11,7 @@ import sys
 import json
 import numpy as np
 import pandas as pd
-from typing import List
+from typing import List, Union
 
 from scipy.ndimage import gaussian_filter
 from scipy.signal import correlate
@@ -937,19 +937,30 @@ class Report:
         return ax
     
     def generate_pymol_session(self, 
-                               density_files:list[str]=None, 
+                               density_files:Union[str, list]=None,
                                selection_string:str=None, 
                                reference_pdb:str=None):
         """Generate a PyMol session from the density maps. The average structure is always used as a reference. 
         You can also include a reference pdb file and specify the residues of interest. 
 
+        :param density_files: list of density files to include in the PyMol session, or a directory with the density files, or a single density file.
+        :type density_files: Union[str, list]
         :param reference_pdb: reference pdb file to load in PyMol.
         :type reference_pdb: str
-        :param density_files: list of density files to include in the same PyMol session. Limited to 5.
-        :type density_files: list
         :param selection_string: PyMol selection string if willing to specify target residues.
         :type selection_string: str
         """
+
+        if os.path.isfile(density_files):
+            density_files = [density_files]
+        elif os.path.isdir(density_files):
+            density_files = [os.path.join(density_files, f) for f in os.listdir(density_files) if f.endswith('.dx')]
+        elif isinstance(density_files, list):
+            pass
+        else:
+            print("Please provide a list of density files to include in the PyMol session.")
+            return
+        
         colors = ['marine', 
                   'orange', 
                   'magenta',
