@@ -5,8 +5,7 @@ import openmm
 import openmm.unit as openmmunit
 from mdtraj.reporters import NetCDFReporter, DCDReporter
 
-def run_simulation( simulation_format: str = 'OPENMM',
-                    results_path: str = "output",
+def run_simulation( results_path: str = "output",
                     positions: str = None,
                     pdb: str = 'output/system.pdb',
                     system: str = 'output/system.xml',
@@ -19,12 +18,8 @@ def run_simulation( simulation_format: str = 'OPENMM',
                     ):
     """_summary_
 
-    :param simulation_format: determines what MD engine will be used, defaults to 'OPENMM'. Available engines are: [AMBER, GROMACS, CHARMM, OPENMM]
-    :type simulation_format: str, optional
     :param results_path: path to where to save the results, defaults to "output"
     :type results_path: str, optional
-    :param topology: path to the topology file if using simulation_format different from OPENMM, defaults to None
-    :type topology: str, optional
     :param positions: path to the positions file if using simulation_format different from OPENMM, defaults to None
     :type positions: str, optional
     :param pdb: path to the pdb file if using simulation_format OPENMM, defaults to 'output/system.pdb'
@@ -47,11 +42,7 @@ def run_simulation( simulation_format: str = 'OPENMM',
     Tend = 300
     Tstep = 5
     
-    openmm_flag = simulation_format == "OPENMM"
     total_steps = warming_steps + simulation_steps
-
-    if simulation_format not in ['OPENMM', 'AMBER', 'GROMACS', 'CHARMM']:
-        raise ValueError(f"Unknown simulation_format {simulation_format}. It must be one of 'OPENMM', 'AMBER', 'GROMACS', or 'CHARMM'.")
     
     assert pdb is not None and system is not None, "If the simulation format specified is OpenMM be sure to pass both pdb file and system.xml"
     pdb = app.PDBFile(f'{results_path}/system.pdb')
@@ -81,10 +72,7 @@ def run_simulation( simulation_format: str = 'OPENMM',
     if seed is not None:
         integrator.setRandomNumberSeed(seed)
     
-    if not openmm_flag:
-        simulation = app.Simulation(topology.topology, system, integrator, platform)
-    else:
-        simulation = app.Simulation(topology, system, integrator, platform)
+    simulation = app.Simulation(topology, system, integrator, platform)
         
     print('Adding reporters to the simulation')
     #every 0.1ns
@@ -107,10 +95,7 @@ def run_simulation( simulation_format: str = 'OPENMM',
     simulation.reporters.append(app.CheckpointReporter(os.path.join(results_path,"simulation.chk"), traj_write_freq*10)) 
 
     print("Setting positions for the simulation")
-    if not openmm_flag:
-        simulation.context.setPositions(positions.positions.value_in_unit(openmmunit.nanometer))
-    else:
-        simulation.context.setPositions(positions)
+    simulation.context.setPositions(positions)
 
     print("Minimizing system's energy")
     simulation.minimizeEnergy()
