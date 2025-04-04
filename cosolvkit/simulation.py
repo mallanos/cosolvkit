@@ -7,7 +7,6 @@ from mdtraj.reporters import NetCDFReporter, DCDReporter
 
 def run_simulation( simulation_format: str = 'OPENMM',
                     results_path: str = "output",
-                    topology: str = None, 
                     positions: str = None,
                     pdb: str = 'output/system.pdb',
                     system: str = 'output/system.xml',
