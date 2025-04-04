@@ -7,15 +7,15 @@ from mdtraj.reporters import NetCDFReporter, DCDReporter
 
 def run_simulation( simulation_format: str = 'OPENMM',
                     results_path: str = "output",
-                    topology: str=None, 
-                    positions: str=None,
+                    topology: str = None, 
+                    positions: str = None,
                     pdb: str = 'output/system.pdb',
                     system: str = 'output/system.xml',
                     membrane_protein: bool = False, 
                     traj_write_freq: int = 25000,
                     time_step: float = 0.004, 
                     warming_steps: int = 100000,
-                    simulation_steps: int = 25000000,
+                    simulation_steps: int = 25000000, # 100ns at 4fs time step
                     seed: int = None
                     ):
     """_summary_
@@ -89,12 +89,12 @@ def run_simulation( simulation_format: str = 'OPENMM',
         
     print('Adding reporters to the simulation')
     #every 0.1ns
-    simulation.reporters.append(app.StateDataReporter(os.path.join(results_path, "statistics.csv"), 25000, step=True, time=True,
+    simulation.reporters.append(app.StateDataReporter(os.path.join(results_path, "statistics.csv"), traj_write_freq, step=True, time=True,
                                                 totalEnergy=True, potentialEnergy=True, kineticEnergy=True, 
                                                 temperature=True, volume=True, density=True,
                                                 progress=True, remainingTime=True, speed=True, totalSteps=total_steps))
     #every 0.1ns
-    simulation.reporters.append(app.StateDataReporter(stdout, 25000, step=True, time=True,
+    simulation.reporters.append(app.StateDataReporter(stdout, traj_write_freq, step=True, time=True,
                                                 totalEnergy=True, potentialEnergy=True, kineticEnergy=True, 
                                                 temperature=True, volume=True, density=True,
                                                 progress=True, remainingTime=True, speed=True, totalSteps=total_steps, separator='\t'))
@@ -105,7 +105,7 @@ def run_simulation( simulation_format: str = 'OPENMM',
 
     
     #every 1ns
-    simulation.reporters.append(app.CheckpointReporter(os.path.join(results_path,"simulation.chk"), 250000)) 
+    simulation.reporters.append(app.CheckpointReporter(os.path.join(results_path,"simulation.chk"), traj_write_freq*10)) 
 
     print("Setting positions for the simulation")
     if not openmm_flag:
@@ -148,6 +148,5 @@ def run_simulation( simulation_format: str = 'OPENMM',
     simulation.context.reinitialize(preserveState=True)
 
     print(f"Running simulation in NPT ensemble for {simulation_steps*0.004/1000} ns")
-    simulation.step(simulation_steps) #25000000 = 100ns
-
+    simulation.step(simulation_steps) 
     return
