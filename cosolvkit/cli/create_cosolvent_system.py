@@ -36,6 +36,9 @@ def cmd_lineparser():
         "--time_step", type=float, default=.004
     )
     parser.add_argument(
+        "--temperature", type=float, default=300.0
+    )
+    parser.add_argument(
         "--iteratively_adjust_copies", action="store_true", default=False
     )
  
@@ -165,6 +168,7 @@ def main():
                         membrane_protein = config.membrane,
                         traj_write_freq = args.traj_write_freq,
                         time_step = args.time_step,
+                        temperature=args.temperature,
                         simulation_steps = args.num_simulation_steps, 
                         results_path = config.output_dir,
                         seed=None
