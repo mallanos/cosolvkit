@@ -6,7 +6,6 @@ import openmm.unit as openmmunit
 from mdtraj.reporters import NetCDFReporter, DCDReporter
 
 def run_simulation( results_path: str = "output",
-                    positions: str = None,
                     pdb: str = 'output/system.pdb',
                     system: str = 'output/system.xml',
                     membrane_protein: bool = False, 
@@ -20,8 +19,6 @@ def run_simulation( results_path: str = "output",
 
     :param results_path: path to where to save the results, defaults to "output"
     :type results_path: str, optional
-    :param positions: path to the positions file if using simulation_format different from OPENMM, defaults to None
-    :type positions: str, optional
     :param pdb: path to the pdb file if using simulation_format OPENMM, defaults to 'output/system.pdb'
     :type pdb: str, optional
     :param system: path to the system.xml file if using simulation_format OPENMM, defaults to 'output/system.xml'
