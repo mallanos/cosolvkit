@@ -11,7 +11,6 @@ def run_simulation( results_path: str = "output",
                     traj_write_freq: int = 25000,
                     time_step: float = 0.004,
                     temperature: float = 300,
-                    warming_steps: int = 100000,
                     simulation_steps: int = 25000000, # 100ns at 4fs time step
                     seed: int = None
                     ):
@@ -31,8 +30,6 @@ def run_simulation( results_path: str = "output",
     :type time_step: float, optional
     :temperature: temperature of the simulation, defaults to 300 K.
     :type temperature: float, optional
-    :param warming_steps: number of warming steps, defaults to 100000
-    :type warming_steps: int, optional
     :param simulation_steps: number of simulation steps, defaults to 25000000
     :type simulation_steps: int, optional
     :param seed: random seed for reproducibility, defaults to None
@@ -41,13 +38,14 @@ def run_simulation( results_path: str = "output",
     """
 
     # set up parameters and units
+    pressure = 1 * openmmunit.bar # bar
     Tstart = 50 * openmmunit.kelvin
     Tend = temperature * openmmunit.kelvin
     Tstep = 5 * openmmunit.kelvin
+    warming_steps = 100000
     warming_timestep = 0.001 * openmmunit.picoseconds # 1fs
     warming_time = warming_steps * warming_timestep #ps
     time_step = time_step * openmmunit.picoseconds # 4fs
-    pressure = 1 * openmmunit.bar # bar
     production_time = simulation_steps * time_step #ps
     total_steps = warming_steps + simulation_steps
     

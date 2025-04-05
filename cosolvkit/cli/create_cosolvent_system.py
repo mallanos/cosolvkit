@@ -165,7 +165,6 @@ def main():
                         membrane_protein = config.membrane,
                         traj_write_freq = args.traj_write_freq,
                         time_step = args.time_step,
-                        warming_steps = 100000,
                         simulation_steps = args.num_simulation_steps, 
                         results_path = config.output_dir,
                         seed=None
