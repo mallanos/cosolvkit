@@ -6,7 +6,7 @@ import openmm.unit as openmmunit
 from mdtraj.reporters import NetCDFReporter, DCDReporter
 
 def run_simulation( results_path: str = "output",
-                    pdb: str = 'output/system.pdb',
+                    pdb_fname: str = None,
                     system: str = 'output/system.xml',
                     membrane_protein: bool = False, 
                     traj_write_freq: int = 25000,
@@ -19,8 +19,8 @@ def run_simulation( results_path: str = "output",
 
     :param results_path: path to where to save the results, defaults to "output"
     :type results_path: str, optional
-    :param pdb: path to the pdb file if using simulation_format OPENMM, defaults to 'output/system.pdb'
-    :type pdb: str, optional
+    :param pdb_fname: path to the pdb file of the system, defaults to None
+    :type pdb_fname: str
     :param system: path to the system.xml file if using simulation_format OPENMM, defaults to 'output/system.xml'
     :type system: str, optional
     :param membrane_protein: True if using a membrane in the system, False otherwise
@@ -41,8 +41,8 @@ def run_simulation( results_path: str = "output",
     
     total_steps = warming_steps + simulation_steps
     
-    assert pdb is not None and system is not None, "If the simulation format specified is OpenMM be sure to pass both pdb file and system.xml"
-    pdb = app.PDBFile(f'{results_path}/system.pdb')
+    assert pdb_fname is not None and system is not None, "If the simulation format specified is OpenMM be sure to pass both pdb file and system.xml"
+    pdb = app.PDBFile(pdb_fname)
     topology = pdb.topology
     positions = pdb.positions
     system = openmm.XmlSerializer.deserialize(open(f'{results_path}/system.xml').read())
