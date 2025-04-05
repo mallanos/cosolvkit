@@ -105,7 +105,7 @@ def run_simulation( results_path: str = "output",
     print("Minimizing system's energy")
     simulation.minimizeEnergy()
 
-    print(f'Heating system in NVT ensemble for {warming_time} ps')
+    print(f'Heating system in NVT ensemble for {warming_time}')
     # Calculate the number of temperature steps
     nT = int((Tend - Tstart) / Tstep)
 
@@ -113,7 +113,7 @@ def run_simulation( results_path: str = "output",
     simulation.context.setVelocitiesToTemperature(Tstart)
     
     # Warm up the system gradually, i.e., temperature annealing
-    for i in range(nT):
+    for i in range(nT+1):
         temperature = Tstart.value_in_unit(openmmunit.kelvin) + i * Tstep.value_in_unit(openmmunit.kelvin)
         integrator.setTemperature(temperature)
         print(f"Temperature set to {temperature} K.")
@@ -136,6 +136,6 @@ def run_simulation( results_path: str = "output",
         system.addForce(openmm.MonteCarloBarostat(pressure, Tend))
     simulation.context.reinitialize(preserveState=True)
 
-    print(f"Running simulation in NPT ensemble for {production_time/1000} ns")
+    print(f"Running simulation in NPT ensemble for {production_time}")
     simulation.step(simulation_steps) 
     return
