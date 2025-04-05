@@ -2,6 +2,7 @@ import os
 import io
 import json
 import time
+import sys
 import argparse
 from collections import defaultdict
 from cosolvkit.config import Config
@@ -26,7 +27,7 @@ def cmd_lineparser():
     parser.add_argument('-c', '--config', dest='config', required=True,
                         action='store', help='path to the json config file')
     parser.add_argument(
-        "--num_simulation_steps", type=int, default=6250000
+        "--num_simulation_steps", type=int, default=25000000
     )
     parser.add_argument(
         "--traj_write_freq", type=int, default=25000
@@ -151,39 +152,22 @@ def main():
                                     out_path=config.output_dir)
         
     if config.run_md:
+        if config.md_format.upper() != "OPENMM":
+            raise ValueError(f"MD format {config.md_format} is not supported for running simulations. Please use OpenMM instead.")
+        
         print("Running MD simulation")
         start = time.time()
-        md_format = config.md_format.upper()
-        if md_format != "OPENMM":
-            topo = os.path.join(config.output_dir, f"system{MD_FORMAT_EXTENSIONS[md_format]['topology']}")
-            pos = os.path.join(config.output_dir, f"system{MD_FORMAT_EXTENSIONS[md_format]['position']}")
-            # This is for openmm
-            pdb = None
-            system = None
-        else:
-            topo = None
-            pos = None
-            # This is for openmm
-            pdb = os.path.join(config.output_dir, "system.pdb")
-            system = os.path.join(config.output_dir, "system.xml")
-        
-        if md_format == "OPENMM":
-            print(f"Starting MD simulation from the files: {pdb}, {system}")
-        else:
-            print(f"Starting MD simulation from the files: {topo}, {pos}")
-        
+        pdb_fname = os.path.join(config.output_dir, "system.pdb")
+        system_fname = os.path.join(config.output_dir, "system.xml")
         run_simulation(
-                        simulation_format = md_format,
-                        topology = topo,
-                        positions = pos,
-                        pdb = pdb,
-                        system = system,
+                        pdb_fname = pdb_fname,
+                        system_fname = system_fname,
                         membrane_protein = config.membrane,
                         traj_write_freq = args.traj_write_freq,
                         time_step = args.time_step,
                         warming_steps = 100000,
                         simulation_steps = args.num_simulation_steps, 
-                        results_path = config.output_dir, # This should be the name of system being simulated
+                        results_path = config.output_dir,
                         seed=None
         )
         print(f"Simulation finished after {(time.time() - start)/60:.2f} min.")
