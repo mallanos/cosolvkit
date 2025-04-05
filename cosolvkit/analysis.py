@@ -719,7 +719,6 @@ class Report:
         if cosolvent_names is None or len(cosolvent_names) == 0:
             print("No cosolvents specified for the density analysis. Using all cosolvents specified in the Report class...")
             cosolvent_names = self.cosolvent_names
-            return
 
         if temperature is None: # If temperature is not passed, so we take the last one from statistics
             if self._temperature is None:
