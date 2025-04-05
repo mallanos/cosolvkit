@@ -1,9 +1,8 @@
 import os
 from sys import stdout
-import openmm.app as app
 import openmm
+import openmm.app as app
 import openmm.unit as openmmunit
-from mdtraj.reporters import NetCDFReporter, DCDReporter
 
 def run_simulation( results_path: str = "output",
                     pdb_fname: str = None,
@@ -41,12 +40,14 @@ def run_simulation( results_path: str = "output",
     :raises ValueError: different checks are performed and expections are raised if some of the fail.
     """
 
-    # Temperature annealing
-    Tstart = 50
-    Tend = temperature
-    Tstep = 5
-    warming_timestep = 0.001
+    # set up parameters and units
+    Tstart = 50 * openmmunit.kelvin
+    Tend = temperature * openmmunit.kelvin
+    Tstep = 5 * openmmunit.kelvin
+    warming_timestep = 0.001 * openmmunit.picoseconds # 1fs
     warming_time = warming_steps * warming_timestep #ps
+    time_step = time_step * openmmunit.picoseconds # 4fs
+    pressure = 1 * openmmunit.bar # bar
     production_time = simulation_steps * time_step #ps
     total_steps = warming_steps + simulation_steps
     
@@ -72,9 +73,9 @@ def run_simulation( results_path: str = "output",
             platform = openmm.Platform.getPlatformByName("CPU")
             print("Switching to CPU, no GPU available.")
 
-    integrator = openmm.LangevinMiddleIntegrator(Tstart * openmmunit.kelvin,
-                                          1 / openmmunit.picosecond,
-                                          warming_timestep * openmmunit.picosecond)
+    integrator = openmm.LangevinMiddleIntegrator(Tstart,
+                                                1 / openmmunit.picosecond,
+                                                warming_timestep)
     if seed is not None:
         integrator.setRandomNumberSeed(seed)
     
@@ -100,7 +101,7 @@ def run_simulation( results_path: str = "output",
     #every 1ns
     simulation.reporters.append(app.CheckpointReporter(os.path.join(results_path,"simulation.chk"), traj_write_freq*10)) 
 
-    print("Setting positions for the simulation")
+    print("Setting initial positions")
     simulation.context.setPositions(positions)
 
     print("Minimizing system's energy")
@@ -113,28 +114,28 @@ def run_simulation( results_path: str = "output",
     # Set initial velocities and temperature
     simulation.context.setVelocitiesToTemperature(Tstart)
     
-    # Warm up the system gradually
+    # Warm up the system gradually, i.e., temperature annealing
     for i in range(nT):
-        temperature = Tstart + i * Tstep
+        temperature = Tstart.value_in_unit(openmmunit.kelvin) + i * Tstep.value_in_unit(openmmunit.kelvin)
         integrator.setTemperature(temperature)
         print(f"Temperature set to {temperature} K.")
         simulation.step(int(warming_steps / nT))
 
     # Increase the timestep for production simulations
-    integrator.setStepSize(time_step * openmmunit.picoseconds)
+    integrator.setStepSize(time_step)
 
     print(f'Adding a Montecarlo Barostat to the system')
     if membrane_protein:
-        barostat = openmm.MonteCarloMembraneBarostat( 1.0 * openmmunit.bar,  # Pressure in bar 
+        barostat = openmm.MonteCarloMembraneBarostat(pressure,  # Pressure in bar 
                                                      0.0 * openmmunit.nanometers * openmmunit.bar,  # surface tension 
-                                                     Tend * openmmunit.kelvin,  # Temperature in Kelvin 
+                                                     Tend,  # Temperature in Kelvin 
                                                      openmm.MonteCarloMembraneBarostat.XYIsotropic,  # XY isotropic scaling 
                                                      openmm.MonteCarloMembraneBarostat.ZFree,  # Z dimension is free 
                                                      15  # Number of Monte Carlo steps 
                                                      ) 
         system.addForce(barostat)
     else:
-        system.addForce(openmm.MonteCarloBarostat(1 * openmmunit.bar, Tend * openmmunit.kelvin))
+        system.addForce(openmm.MonteCarloBarostat(pressure, Tend))
     simulation.context.reinitialize(preserveState=True)
 
     print(f"Running simulation in NPT ensemble for {production_time/1000} ns")
