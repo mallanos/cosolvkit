@@ -28,6 +28,8 @@ def run_simulation( results_path: str = "output",
     :type membrane_protein: bool, optional
     :param traj_write_freq: frequency of writing the trajectory, defaults to 25000
     :type traj_write_freq: int, optional
+    :param time_step: time step of the simulation, defaults to 0.004
+    :type time_step: float, optional
     :temperature: temperature of the simulation, defaults to 300 K.
     :type temperature: float, optional
     :param warming_steps: number of warming steps, defaults to 100000
