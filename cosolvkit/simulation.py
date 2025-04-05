@@ -45,7 +45,9 @@ def run_simulation( results_path: str = "output",
     Tstart = 50
     Tend = temperature
     Tstep = 5
-    
+    warming_timestep = 0.001
+    warming_time = warming_steps * warming_timestep #ps
+    production_time = simulation_steps * time_step #ps
     total_steps = warming_steps + simulation_steps
     
     assert pdb_fname is not None and system_fname is not None, "To run a simulation in OpenMM both a pdb file and system.xml must be provided."
@@ -72,7 +74,7 @@ def run_simulation( results_path: str = "output",
 
     integrator = openmm.LangevinMiddleIntegrator(Tstart * openmmunit.kelvin,
                                           1 / openmmunit.picosecond,
-                                          0.001 * openmmunit.picosecond)
+                                          warming_timestep * openmmunit.picosecond)
     if seed is not None:
         integrator.setRandomNumberSeed(seed)
     
@@ -104,7 +106,7 @@ def run_simulation( results_path: str = "output",
     print("Minimizing system's energy")
     simulation.minimizeEnergy()
 
-    print(f'Heating system in NVT ensemble for {warming_steps*0.001/1000} ns')
+    print(f'Heating system in NVT ensemble for {warming_time} ps')
     # Calculate the number of temperature steps
     nT = int((Tend - Tstart) / Tstep)
 
@@ -135,6 +137,6 @@ def run_simulation( results_path: str = "output",
         system.addForce(openmm.MonteCarloBarostat(1 * openmmunit.bar, Tend * openmmunit.kelvin))
     simulation.context.reinitialize(preserveState=True)
 
-    print(f"Running simulation in NPT ensemble for {simulation_steps*0.004/1000} ns")
+    print(f"Running simulation in NPT ensemble for {production_time/1000} ns")
     simulation.step(simulation_steps) 
     return
