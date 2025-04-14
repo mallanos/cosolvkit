@@ -23,12 +23,12 @@ class Config(object):
                  solvent_copies=None,
                  ligands= dict(),
                  padding=None,
+                 box_size=None,
                  membrane=False,
                  lipid_type=None,
                  lipid_patch_path=None,
                  memb_cosolv_placement='both',
                  waters_to_keep=list(),
-                 radius=None,
                  output_dir=None,
                  run_cosolvent_system=True,
                  run_md=False):
@@ -47,12 +47,12 @@ class Config(object):
         self.solvent_copies = solvent_copies
         self.ligands = ligands
         self.padding = padding
+        self.box_size = box_size
         self.membrane = membrane
         self.lipid_type = lipid_type
         self.lipid_patch_path = lipid_patch_path
         self.memb_cosolv_placement = memb_cosolv_placement
         self.waters_to_keep = waters_to_keep
-        self.radius = radius
         self.output_dir = output_dir
         self.run_cosovlent_system = run_cosolvent_system
         self.run_md = run_md

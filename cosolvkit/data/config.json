@@ -13,12 +13,12 @@
   "solvent_copies": null,
   "ligands": {},
   "padding": 10.0,
+  "box_size": null,
   "membrane": false,
   "lipid_type": "POPC",
   "lipid_patch_path": null,
   "memb_cosolv_placement": "both",
   "waters_to_keep": [],
-  "radius": null,
   "output_dir": "results",
   "run_cosolvent_system": true,
   "run_md": true

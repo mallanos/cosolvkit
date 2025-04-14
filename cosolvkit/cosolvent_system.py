@@ -166,7 +166,7 @@ class CosolventSystem(object):
                  simulation_format: str, 
                  modeller: app.Modeller,  
                  padding: openmmunit.Quantity, 
-                 radius: openmmunit.Quantity = None):
+                 box_size: openmmunit.Quantity = None):
         """Create cosolvent system.
 
         :param cosolvents: dictionary of cosolvent molecules
@@ -181,8 +181,8 @@ class CosolventSystem(object):
         :type modeller: openmm.app.Modeller
         :param padding: specifies the padding used to create the simulation box, defaults to 10 * openmmunit.angstrom
         :type padding: openmm.unit.Quantity, optional
-        :param radius: Specifies the radius to create the box without receptor, defaults to None
-        :type radius: openmm.unit.Quantity, optional
+        :param box_size: Specifies the size to create the box without receptor, defaults to None
+        :type box_size: openmm.unit.Quantity, optional
         """
         # Private
         self._available_formats = ["AMBER", "GROMACS", "CHARMM", "OPENMM"]
@@ -198,7 +198,7 @@ class CosolventSystem(object):
         self.system = None
         self.modeller = None
         self.cosolvents = dict()
-        self.radius = radius
+        self.box_size = box_size
         self.small_molecule_forcefield = forcefields["small_molecules"][0]
         padding = padding * openmmunit.angstrom
         
@@ -215,14 +215,14 @@ class CosolventSystem(object):
 
         self.modeller = modeller
         
-        if self.radius is not None:
-            assert (isinstance(radius, openmmunit.Quantity)) and (radius.unit == openmmunit.angstrom), \
-                "Error! If no receptor is passed, the radius parameter has to be set and it needs to be in angstrom openmm.unit"
-            self.vectors, self.box, self.lowerBound, self.upperBound = self._build_box(None, padding, radius=radius)
+        if self.box_size is not None:
+            assert (isinstance(box_size, openmmunit.Quantity)) and (box_size.unit == openmmunit.angstrom), \
+                "Error! If no receptor is passed, the box_size parameter has to be set and it needs to be in angstrom openmm.unit"
+            self.vectors, self.box, self.lowerBound, self.upperBound = self._build_box(None, padding, box_size=box_size)
             self.receptor = False
         else:
             self.receptor = True
-            self.vectors, self.box, self.lowerBound, self.upperBound = self._build_box(self.modeller.positions, padding, radius=None)
+            self.vectors, self.box, self.lowerBound, self.upperBound = self._build_box(self.modeller.positions, padding, box_size=None)
         
         # Setting up the box - This has to be done before building the system with
         # the cosolvent molecules.
@@ -258,7 +258,7 @@ class CosolventSystem(object):
         :type iteratively_adjust_copies: bool, optional 
         """
         volume_not_occupied_by_cosolvent = self.fitting_checks()
-        assert volume_not_occupied_by_cosolvent is not None, "The requested volume for the cosolvents exceeds the available volume! Please try increasing the box padding or radius."
+        assert volume_not_occupied_by_cosolvent is not None, "The requested volume for the cosolvents exceeds the available volume! Please try increasing the padding or box_size."
         receptor_positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)
         if iteratively_adjust_copies:
             cosolv_xyzs = self.add_cosolvents_adaptive(self.cosolvents, self.vectors, self.lowerBound, self.upperBound, receptor_positions)
@@ -1220,7 +1220,7 @@ class CosolventSystem(object):
     def _build_box(self, 
                    positions: np.ndarray, 
                    padding: openmmunit.Quantity, 
-                   radius: openmmunit.Quantity = None) -> Tuple[Tuple[Vec3, Vec3, Vec3], 
+                   box_size: openmmunit.Quantity = None) -> Tuple[Tuple[Vec3, Vec3, Vec3], 
                                                                 Vec3, 
                                                                 Union[openmmunit.Quantity, Vec3],
                                                                 Union[openmmunit.Quantity, Vec3]]:
@@ -1232,8 +1232,8 @@ class CosolventSystem(object):
         :type positions: np.ndarray
         :param padding: padding to be used
         :type padding: openmm.unit.Quantity
-        :param radius: radius specified if no receptor is passed, defaults to None
-        :type radius: openmm.unit.Quantity, optional
+        :param box_size: box_size specified if no receptor is passed, defaults to None
+        :type box_size: openmm.unit.Quantity, optional
         :return: The first element returned is a tuple containing the three vectors describing the simulation box.
                 The second element is the box itself.
                 Third and fourth elements are the lower and upper bound of the simulation box.
@@ -1249,7 +1249,7 @@ class CosolventSystem(object):
             width = max(2*radius+padding, 2*padding)
         else:
             center = Vec3(0, 0, 0)
-            radius = radius.value_in_unit(openmmunit.nanometer)
+            radius = box_size.value_in_unit(openmmunit.nanometer) / 2
             maxRange = Vec3(radius, radius, radius)
             minRange = Vec3(-radius, -radius, -radius)
             width = radius
@@ -1275,7 +1275,7 @@ class CosolventMembraneSystem(CosolventSystem):
                  simulation_format: str, 
                  modeller: app.Modeller,  
                  padding: openmmunit.Quantity = 10 * openmmunit.angstrom, 
-                 radius: openmmunit.Quantity = None,
+                 box_size: openmmunit.Quantity = None,
                  lipid_type: str=None,
                  lipid_patch_path: str=None):
         """Creates a CosolventMembraneSystem.
@@ -1290,8 +1290,8 @@ class CosolventMembraneSystem(CosolventSystem):
         :type modeller: openmm.app.Modeller
         :param padding: specify the padding to be used to create the simulation box, defaults to 12*openmmunit.angstrom
         :type padding: openmm.unit.Quantity, optional
-        :param radius: specifies the radius to create the box without receptor, defaults to None
-        :type radius: openmm.unit.Quantity, optional
+        :param box_size: specifies the size to create the box without receptor, defaults to None
+        :type box_size: openmm.unit.Quantity, optional
         :param lipid_type: lipid type to use to build the membrane system, defaults to None. Supported types: ["POPC", "POPE", "DLPC", "DLPE", "DMPC", "DOPC", "DPPC"]. 
                                         Mutually exclusive with <lipid_patch_path>.
         :type lipid_type: str, optional
@@ -1305,7 +1305,7 @@ class CosolventMembraneSystem(CosolventSystem):
                          simulation_format=simulation_format,
                          modeller=modeller,
                          padding=padding,
-                         radius=radius)
+                         box_size=box_size)
         
         self.protein_raidus = 1.5 * openmmunit.angstrom
         self.cosolvents_radius = 2.5 * openmmunit.angstrom           
@@ -1412,7 +1412,7 @@ class CosolventMembraneSystem(CosolventSystem):
             lowerBound = self.lowerBound
         print("Checking volumes...")
         volume_not_occupied_by_cosolvent = self.fitting_checks()
-        assert volume_not_occupied_by_cosolvent is not None, "The requested volume for the cosolvents exceeds the available volume! Please try increasing the box padding or radius."
+        assert volume_not_occupied_by_cosolvent is not None, "The requested volume for the cosolvents exceeds the available volume! Please try increasing the padding or box_size."
         receptor_positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)
         if iteratively_adjust_copies:
             cosolv_xyzs = self.add_cosolvents_adaptive(self.cosolvents, self.vectors, lowerBound, upperBound, receptor_positions)

@@ -82,7 +82,7 @@ The main entry point of the script is the file `config.json` where all the neces
 |lipid_patch_path         | string | If the lipid required is not in the available, it is possible to pass a pre-equilibrated patch of the lipid of interest. | no default | |
 |memb_cosolvent_placement      | string | Which side of the membrane to place the cosolvents. Available options: [both -> no preference, outside, inside] | both | |
 |waters_to_keep           | list | List of indices of waters of interest in a membrane system. | no default | |
-|radius                   | float | If no receptor, the radius is necessary to set the size of the simulation box. | no default | |
+|box_size                   | float | If no receptor, the box_size is necessary to set the size of the simulation box. | no default | |
 |output_dir               | string | Path to where save the results. | no default | |
 |run_cosolvent_system     | boolean | Flag indicating if running creating the system or not. | TRUE | |
 |run_md                   | boolean | Flag indicating if running the md simulation after creating the system or not. | FALSE | ✅ | ❌ | ❌ | ❌ |

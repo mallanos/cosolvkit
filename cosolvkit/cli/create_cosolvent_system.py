@@ -52,8 +52,8 @@ def main():
     os.makedirs(config.output_dir, exist_ok=True)
 
     if config.run_cosovlent_system:
-        if (config.protein_path is not None and config.radius is not None) or (config.protein_path is None and config.radius is None):
-            raise SystemExit("Error! If the config file specifies a receptor, the radius should be set to null and vice versa.")
+        if (config.protein_path is not None and config.box_size is not None) or (config.protein_path is None and config.box_size is None):
+            raise SystemExit("Error! If the config file specifies a receptor, the box_size should be set to null and vice versa.")
         
         if config.protein_path is not None:
             print(f"Loading receptor file {config.protein_path}")
@@ -99,9 +99,9 @@ def main():
                 protein_topology, protein_positions = add_variants(protein_topology, protein_positions, variants_list)
                 
         else:
-            assert config.radius is not None, "radius is None in the config"
+            assert config.box_size is not None, "box_size is None in the config"
             # Create empty modeller since there's nothing in the system yet
-            config.radius = config.radius * openmmunit.angstrom
+            config.box_size = config.box_size * openmmunit.angstrom
             protein_topology, protein_positions = Topology(), None
 
         protein_modeller = Modeller(protein_topology, protein_positions)
@@ -125,7 +125,7 @@ def main():
                                                     simulation_format=config.md_format,
                                                     modeller=protein_modeller,
                                                     padding=config.padding,
-                                                    radius=config.radius,
+                                                    box_size=config.box_size,
                                                     lipid_type=config.lipid_type,
                                                     lipid_patch_path=config.lipid_patch_path)
             cosolv_system.add_membrane(cosolvent_placement=config.memb_cosolv_placement,
@@ -138,7 +138,7 @@ def main():
                                             simulation_format=config.md_format,
                                             modeller=protein_modeller,
                                             padding=config.padding,
-                                            radius=config.radius)
+                                            box_size=config.box_size)
             cosolv_system.build(solvent_smiles=config.solvent_smiles,
                                 n_solvent_molecules=config.solvent_copies,
                                 iteratively_adjust_copies=args.iteratively_adjust_copies)
