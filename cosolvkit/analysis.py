@@ -37,7 +37,7 @@ def _read_dx(filepath:str=None) -> Grid:
     """Reads a .dx map using gridData.Grid."""
     return Grid(str(filepath))
 
-def combine_dx_maps(filepaths: List[str] = None, method:str= 'mean', out_path:str='.') -> Grid:
+def combine_dx_maps(filepaths: List[str] = None, method:str= 'mean', out_fname:str='combined.dx') -> Grid:
     """Combines multiple .dx map files into one using a specified method."""
 
     grids = [_read_dx(path) for path in filepaths]
@@ -64,7 +64,7 @@ def combine_dx_maps(filepaths: List[str] = None, method:str= 'mean', out_path:st
     combined_data = agg_fn(stacked, axis=0)
     combined_grid = Grid(combined_data, grids[0].edges)
 
-    combined_grid.export(f'{out_path}/combined_{method}.dx')
+    combined_grid.export(out_fname)
 
     return combined_grid
 
@@ -85,48 +85,7 @@ def _normalization(data, a:float=None, b:float=None):
     epsilon = 1e-20  # small value to avoid division by zero
     return a + ((data - min_data) * (b - a)) / (max_data - min_data + epsilon)
 
-def compute_local_entropy(occupancy, radius=2):
-    """
-    Computes the local spatial entropy (LSE) of the occupancy map. Uses a very simple and cheap
-    method to estimate the local entropy of each voxel based on a smoothed occupancy map.
-    A Gaussian filter is applied to the occupancy map to estimate local probabilities, which are
-    then used to compute the local entropy. A KDE-based method would be toooo slow.
-
-    :param occupancy: 3D numpy array of occupancy values.
-    :param radius: Defines the neighborhood size.
-    :return: 3D numpy array of local entropy values.
-    """
-    
-    # Normalize occupancy to get probability distribution
-    occupancy_prob = occupancy / np.sum(occupancy)
-    
-    # Smooth the occupancy to estimate local probabilities
-    smoothed = gaussian_filter(occupancy_prob, sigma=radius)
-    
-    # Compute entropy per voxel
-    local_entropy = -smoothed * np.log(smoothed + 1e-10)  # Avoid log(0)
-    
-    return local_entropy
-
-def entropy_corrected_free_energy(gfe, occupancy, lambda_factor=0.5, radius=2):
-    """
-    Applies entropy correction to the grid free energy map.
-
-    :param gfe: 3D numpy array of free energy values.
-    :param occupancy: 3D numpy array of occupancy values.
-    :param lambda_factor: Scaling factor for entropy correction.
-    :param radius: Neighborhood size for entropy calculation.
-    :return: 3D numpy array of corrected free energy values.
-            """
-    # Compute local entropy
-    local_entropy = compute_local_entropy(occupancy, radius=radius)
-    
-    # Apply entropy correction
-    gfe_corrected = gfe + lambda_factor * local_entropy
-
-    return gfe_corrected
-
-def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correction=False):
+def _grid_free_energy(hist, n_atoms, n_frames, temperature=300):
     """
     Compute the atomic grid free energy (GFE) from a given histogram.
     
@@ -134,7 +93,6 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correct
     :param n_atoms: Total number of cosolvent atoms (not total system atoms)
     :param n_frames: Number of frames in the trajectory
     :param temperature: Temperature in Kelvin (default 300K)
-    :param entropy_correction: Apply entropy correction to the free energy map (default False)
     :return: 3D numpy array of free energy values (same shape as `hist`)
     """
 
@@ -161,11 +119,6 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300., entropy_correct
     gfe = -(BOLTZMANN_CONSTANT_KB * temperature) * np.log(N / N_o)
 
     print(f'Min GFE: {np.min(gfe)}, Max GFE: {np.max(gfe)}')
-
-    if entropy_correction:
-        occupancy = hist / n_frames
-        gfe = entropy_corrected_free_energy(gfe, occupancy, lambda_factor=1000, radius=5)
-        print(f'Min GFE corrected: {np.min(gfe)}, Max GFE corrected: {np.max(gfe)}')
     
     return gfe
 
