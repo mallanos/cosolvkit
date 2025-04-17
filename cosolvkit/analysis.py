@@ -407,7 +407,7 @@ class Analysis(AnalysisBase):
         """
         if self.use_atomtypes:
             for atom_type, grid in self._type_histograms.items():
-                density_fname=fname.replace('map_density', f'map_density_{atom_type}')
+                density_fname=fname.replace('map_rawdensity', f'map_density_{atom_type}')
                 _export(density_fname, grid, gridsize, center, box_size)
         else:
             _export(fname, self._density, gridsize, center, box_size)
