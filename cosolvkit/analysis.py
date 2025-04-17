@@ -995,3 +995,64 @@ class Report:
             
         cmd.save(os.path.join(self.out_path, "pymol_results_session.pse"))
         return
+    
+    def generate_vmd_session(self, 
+                             density_files:Union[str, list]=None, 
+                            ):
+        """
+        Generate a VMD session script to visualize the trajectory and density.
+        This i very basic and can be improved in the future, but I like more VMD or ChimeraX 
+        for visualizing the densities becuase they have sliders and are more interactive.
+
+        :param output_vmd_file: Path to save the VMD session script (.vmd)
+        :type output_vmd_file: str
+        """
+        # FIXME at some point like for pymol 
+        isovalue = 1.0 
+        output_vmd_file = os.path.join(self.out_path, "vmd_session.vmd")
+
+        # Get absolute paths for the files
+        topology_abs_path = os.path.abspath(self.topology)
+        trajectory_abs_path = os.path.abspath(self.trajectory)
+
+        vmd_script = f"""
+    # VMD visualization script
+
+    # Load topology and trajectory
+    mol new {topology_abs_path} type parm7
+    mol addfile {trajectory_abs_path} type netcdf waitfor all
+
+    # Set up protein visualization
+    mol delrep 0 top
+    mol representation NewCartoon
+    mol color Structure
+    mol selection "protein"
+    mol material Opaque
+    mol addrep top"""
+        
+        # Load density maps
+        for i,density in enumerate(density_files):
+            density_dx_abs_path = os.path.abspath(density)
+            vmd_script += f"""
+
+    # Load density map
+    mol new {density_dx_abs_path} type dx waitfor all
+    mol representation Isosurface {isovalue} 0 0 0 1
+    mol color ColorID {i}
+    mol material Transparent
+    mol addrep top"""
+        
+        vmd_script += f"""
+
+    color Display Background white
+
+    save_state {output_vmd_file}
+    """
+
+        # Write script to file
+        with open(output_vmd_file, "w") as f:
+            f.write(vmd_script)
+
+        print(f"VMD session script saved as {output_vmd_file}")
+        
+        return
