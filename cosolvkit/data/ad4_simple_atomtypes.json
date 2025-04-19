@@ -1,7 +1,6 @@
 {
 "ad4_simple": [
     {"atype": "A", "smarts": "[c]"},
-    {"atype": "HD", "smarts": "[#1][#7,#8,#9,#15,#16]"},
     {"atype": "NA", "smarts": "[#7]"},
     {"atype": "OA", "smarts": "[#8]"}
     ]
