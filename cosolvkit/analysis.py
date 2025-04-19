@@ -96,7 +96,7 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300):
     :return: 3D numpy array of free energy values (same shape as `hist`)
     """
 
-    # FIXME: #44 for atomtype analysis Im not sure if we need to use the all cosolvent atoms to calculate the volume    
+    # for atomtype analysis Im not sure if we need to use the all cosolvent atoms to calculate the volume    
     # Before the volume_water was calculated as the total volume of the box, but it should be the volume of the solvent region
     # this approximation is not correct, but it is a good starting point
     n_accessible_voxels = np.sum(hist > 0)  # Count nonzero occupancy voxels
@@ -549,7 +549,8 @@ class Report:
                                     cosolvent_names: list[str] = None,
                                     candidate_residues: list[tuple] = None, 
                                     radius: float = 5, 
-                                    max_tau: int = 100
+                                    max_tau: int = 100,
+                                    intermittency: int = 1
                                     ):
         """Computes the survival probability of the cosolvent around a spherical zone centered 
         at the COM of the candidate residues. Uses the waterdynamics package to compute the survival 
@@ -566,6 +567,8 @@ class Report:
         :type radius: float
         :param max_tau: maximum tau to analyze.
         :type max_tau: int
+        :param intermittency: intermittency of the interaction, defaults to 1.
+        :type intermittency: int, optional
         """
         try:
             from waterdynamics import SurvivalProbability as SP
@@ -591,7 +594,7 @@ class Report:
 
                 sp = SP(self.universe, select, verbose=True)
                 # The default intermittency is continuous (0).
-                sp.run(tau_max=max_tau, residues=False, intermittency=1)
+                sp.run(tau_max=max_tau, residues=False, intermittency=intermittency)
 
                 for tau, sp_value in zip(sp.tau_timeseries,  sp.sp_timeseries):
                         data.append({'Group': res_idx, 'Residues':residue_group, 
