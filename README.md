@@ -213,7 +213,7 @@ cosolv.add_repulsive_forces(resiude_names=["BEN", "PRP"])
 
 ## List of cosolvent molecules
 Non-exhaustive list of suggested cosolvents (molecule_name, SMILES string and resname):
-* Benzene 1ccccc1 BEN
+* Benzene C1=CC=CC=C1 BEN
 * Methanol CO MEH
 * Propane CCC PRP
 * Imidazole C1=CN=CN1 IMI
