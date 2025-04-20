@@ -7,6 +7,8 @@
 #
 
 from typing import List, Tuple
+import os
+import logging
 from openmm.app import *
 from openmm import *
 import pdbfixer
@@ -28,6 +30,37 @@ class MutuallyExclusiveParametersError(Exception):
     """
     pass   
 
+# def setup_logging(level:str="INFO", filepath:str=None):
+#     """Set up logging for the application at the entry point, i.e. cli scripts."""
+#     handlers = [logging.StreamHandler()]
+#     if filepath:
+#         os.makedirs(os.path.dirname(filepath), exist_ok=True)
+#         handlers.append(logging.FileHandler(filepath, mode="a"))
+
+#     logging.basicConfig(
+#         level=level,
+#         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+#         handlers=handlers,
+#     )
+#     return
+
+def setup_logging(level:str="INFO", filepath:str=None):
+    logger = logging.getLogger("cosolvkit")
+    logger.setLevel(level.upper())
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    
+    handlers = [logging.StreamHandler()]
+    if filepath:
+        handlers.append(logging.FileHandler(filepath, mode="a"))
+    
+    for handler in handlers:
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    logger.propagate = False  # Prevent logs from being passed to root logger
+    
+    return logger
 
 # def add_harmonic_restraints(prmtop, inpcrd, system, atom_selection, k=1.0):
 #     """Add harmonic restraints to the system.

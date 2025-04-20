@@ -6,7 +6,7 @@ import sys
 import argparse
 from collections import defaultdict
 from cosolvkit.config import Config
-from cosolvkit.utils import fix_pdb, add_variants, MD_FORMAT_EXTENSIONS
+from cosolvkit.utils import setup_logging, fix_pdb, add_variants, MD_FORMAT_EXTENSIONS
 from cosolvkit.cosolvent_system import CosolventSystem, CosolventMembraneSystem
 from cosolvkit.simulation import run_simulation
 from openmm.app import *
@@ -45,22 +45,31 @@ def cmd_lineparser():
     return parser.parse_args()
 
 def main():
+
+    # Parse command line arguments
     args = cmd_lineparser()
     config_file = args.config
+
+    # Load config file
     config = Config.from_config(config_file)
-    # Start setting up the pipeline
     os.makedirs(config.output_dir, exist_ok=True)
 
+    # Set up logging
+    logger=setup_logging(level="INFO", filepath=f"{config.output_dir}/cosolvkit.log")
+
     if config.run_cosovlent_system:
+        start = time.time()
         if (config.protein_path is not None and config.box_size is not None) or (config.protein_path is None and config.box_size is None):
+            logger.error("Error! If the config file specifies a receptor, the box_size should be set to null and vice versa.")
             raise SystemExit("Error! If the config file specifies a receptor, the box_size should be set to null and vice versa.")
         
         if config.protein_path is not None:
-            print(f"Loading receptor file {config.protein_path}")
+            logger.info(f"Loading receptor file {config.protein_path}")
             try:
                 with open(config.protein_path) as f:
                     pdb_string = io.StringIO(f.read())
             except FileNotFoundError:
+                logger.error(f"Error! File {config.protein_path} not found.")
                 raise SystemExit(f"Error! File {config.protein_path} not found.")
         
             # Check if we need to clean the protein and add variants of residues
@@ -71,6 +80,7 @@ def main():
                     pdbfile = pdb_string
                 else:
                     pdbxfile = pdb_string
+                logger.info("Cleaning protein structure")
                 protein_topology, protein_positions = fix_pdb(pdbfile=pdbfile,
                                                             pdbxfile=pdbxfile, 
                                                             keep_heterogens=config.keep_heterogens)
@@ -83,6 +93,7 @@ def main():
                 
             # Call add_variants funtion to assing variants to the protein
             if len(config.variants.keys()) > 0:
+                logger.info("Adding variants to the protein")
                 variants_list = list()
                 residues = list(protein_topology.residues())
                 mapping = defaultdict(list)
@@ -108,6 +119,7 @@ def main():
 
         # Check repulsive forces and md engine consistency        
         if (config.md_format.upper() != "OPENMM") and len(config.repulsive_residues) > 0:
+            logger.warning("Custom repulsive forces will only work if the MD engine is OpenMM!")
             raise Warning("Custom repulsive forces will only work if the MD engine is OpenMM!")
     
         # Load cosolvents and forcefields dictionaries
@@ -117,8 +129,8 @@ def main():
         with open(config.forcefields) as fi:
             forcefields = json.load(fi)
 
-        print("Building cosolvent system")
         if config.membrane:
+            logger.info("Building a membrane-cosolvent system")
             cosolv_system = CosolventMembraneSystem(cosolvents=cosolvents,
                                                     forcefields=forcefields,
                                                     ligands=config.ligands,
@@ -132,6 +144,7 @@ def main():
                                     waters_to_keep=config.waters_to_keep)
             cosolv_system.build(iteratively_adjust_copies=args.iteratively_adjust_copies)
         else:
+            logger.info("Building cosolvent system")
             cosolv_system = CosolventSystem(cosolvents=cosolvents,
                                             forcefields=forcefields,
                                             ligands=config.ligands,
@@ -144,21 +157,24 @@ def main():
                                 iteratively_adjust_copies=args.iteratively_adjust_copies)
             
         if len(config.repulsive_residues) > 0:
+            logger.info("Adding custom repulsive forces to the system")
             cosolv_system.add_repulsive_forces(config.repulsive_residues, epsilon=config.repulsive_epsilon, sigma=config.repulsive_sigma)
 
-        print("Saving topology file")
+        logger.info("Saving topology file")
         cosolv_system.save_topology(topology=cosolv_system.modeller.topology, 
                                     positions=cosolv_system.modeller.positions,
                                     system=cosolv_system.system,
                                     simulation_format=config.md_format,
                                     forcefield=cosolv_system.forcefield,
                                     out_path=config.output_dir)
-        
+    logger.info(f"All done! System building took {(time.time() - start)/60:.2f} min.")    
+
     if config.run_md:
         if config.md_format.upper() != "OPENMM":
+            logger.error(f"MD format {config.md_format} is not supported for running simulations. Please use OpenMM instead.")
             raise ValueError(f"MD format {config.md_format} is not supported for running simulations. Please use OpenMM instead.")
         
-        print("Running MD simulation")
+        logger.info("Running MD simulation")
         start = time.time()
         pdb_fname = os.path.join(config.output_dir, "system.pdb")
         system_fname = os.path.join(config.output_dir, "system.xml")
@@ -173,7 +189,7 @@ def main():
                         results_path = config.output_dir,
                         seed=None
         )
-        print(f"Simulation finished after {(time.time() - start)/60:.2f} min.")
+        logger.info(f"Simulation finished after {(time.time() - start)/60:.2f} min.")
     return
 
 

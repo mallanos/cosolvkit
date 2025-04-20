@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import io
+import logging
 from collections import defaultdict
 from typing import Union, Tuple
 import numpy as np
@@ -184,6 +185,9 @@ class CosolventSystem(object):
         :param box_size: Specifies the size to create the box without receptor, defaults to None
         :type box_size: openmm.unit.Quantity, optional
         """
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+
         # Private
         self._available_formats = ["AMBER", "GROMACS", "CHARMM", "OPENMM"]
         self._cosolvent_positions = defaultdict(list)
@@ -230,10 +234,8 @@ class CosolventSystem(object):
         self._periodic_box_vectors = self.modeller.topology.getPeriodicBoxVectors().value_in_unit(openmmunit.nanometer)
         vX, vY, vZ = self.modeller.topology.getUnitCellDimensions().value_in_unit(openmmunit.nanometer)
         self.box_volume = vX * vY * vZ
-        print("Parametrizing system with forcefields")
+        self.logger.info("Parameterizing system components with forcefields")
         self.forcefield = self._parametrize_system(forcefields, simulation_format, self.cosolvents)
-        print(f"Box Volume: {self.box_volume} nm**3")
-        print(f"\t{self.box_volume*1000} A^3")
         return
     
 #region Public
@@ -257,6 +259,7 @@ class CosolventSystem(object):
         :param iteratively_adjust_copies: if True, the number of copies of each cosolvent will iteratively be reduced until a valid starting configuration is found
         :type iteratively_adjust_copies: bool, optional 
         """
+        self.logger.info("Checking volumes..")
         volume_not_occupied_by_cosolvent = self.fitting_checks()
         assert volume_not_occupied_by_cosolvent is not None, "The requested volume for the cosolvents exceeds the available volume! Please try increasing the padding or box_size."
         receptor_positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)
@@ -273,7 +276,7 @@ class CosolventSystem(object):
         if solvent_smiles == "H2O":
             if n_solvent_molecules is None: self.modeller.addSolvent(self.forcefield, neutralize=neutralize)
             else: self.modeller.addSolvent(self.forcefield, numAdded=n_solvent_molecules, neutralize=neutralize)
-            print(f"Waters added: {self._get_n_waters()}")
+            self.logger.info(f"Waters added: {self._get_n_waters()}")
         elif solvent_smiles is not None:
             c = {"name": "solvent",
                  "smiles": solvent_smiles}
@@ -287,7 +290,7 @@ class CosolventSystem(object):
             d_mol = {solvent_mol: cosolv_xyz.value_in_unit(openmmunit.nanometer)}
             # need to register the custom solvent if not present already
             self.forcefield.registerTemplateGenerator(self._parametrize_cosolvents(d_mol).generator)
-            print(f"Placing {solvent_mol.copies}")
+            self.logger.info(f"Placing {solvent_mol.copies}")
             if iteratively_adjust_copies: 
                 solv_xyz = self.add_cosolvents_adaptive(d_mol, self.vectors, self.lowerBound, self.upperBound, self.modeller.positions)
             else:
@@ -427,8 +430,8 @@ class CosolventSystem(object):
             self.save_pdb(topology, positions, f"{out_path}/system{pos_extension}")
             parmed_structure.save(f'{out_path}/system{top_extension}', overwrite=True)
         else:
-            print("The specified simulation engine is not supported!")
-            print(f"Available simulation engines:\n\t{self._available_formats}")
+            self.logger.info("The specified simulation engine is not supported!")
+            self.logger.info(f"Available simulation engines:\n\t{self._available_formats}")
         return
 
     def reduce_copies(self, factor_reduction: float):
@@ -654,7 +657,6 @@ class CosolventSystem(object):
         :return: the new system
         :rtype: openmm.System
         """
-        print("Creating system")
         system = forcefield.createSystem(topology,
                                          nonbondedMethod=app.PME,
                                          nonbondedCutoff=10*openmmunit.angstrom,
@@ -720,7 +722,7 @@ class CosolventSystem(object):
         num_mol_insertion_attempts = 0 
 
         for cosolvent in cosolvents:
-            print(f"Attempting to place {cosolvent.copies} copies of {cosolvent.name}")
+            self.logger.info(f"Attempting to place {cosolvent.copies} copies of {cosolvent.name}")
             c_xyz = cosolvents[cosolvent]
             while len(cosolv_xyzs[cosolvent]) < cosolvent.copies:
             # for replicate in range(cosolvent.copies):
@@ -741,21 +743,19 @@ class CosolventSystem(object):
                     num_mol_insertion_attempts += 1 
 
                     if isinstance(cosolv_xyz, int):
-                        print("Could not place cosolvent molecule %d!" % mol_num)
+                        self.logger.info("Could not place cosolvent molecule %d!" % mol_num)
                         if num_mol_insertion_attempts < max_attempts_per_mol: 
-                            print("Attempting again...")
+                            self.logger.warning("Attempting again...")
                         else:
-                            print("Unable to insert cosolvent molecule %d after %d attempts" % (mol_num, max_attempts_per_mol))
-                            print("Exiting..")
+                            self.logger.error("Unable to insert cosolvent molecule %d after %d attempts" % (mol_num, max_attempts_per_mol))
                             sys.exit(1)
                     else:
                         cosolv_xyzs[cosolvent].append(cosolv_xyz*openmmunit.nanometer)
                         [placed_atoms_positions.append(pos) for pos in cosolv_xyz]
                         num_mol_insertion_attempts = 0
-            print("Done!")
-        print("Added cosolvents:")
+        self.logger.info("The following cosolvents were added:")
         for cosolvent in cosolv_xyzs:
-            print(f"{cosolvent.name}: {len(cosolv_xyzs[cosolvent])}")
+            self.logger.info(f"{cosolvent.name}: {len(cosolv_xyzs[cosolvent])}")
         return cosolv_xyzs
 
 
@@ -818,7 +818,7 @@ class CosolventSystem(object):
         num_autoadjust_attempts = 0
         
         while num_autoadjust_attempts < max_autoadjust_attempts:
-            print("*****************************************************************")
+            self.logger.info("*****************************************************************")
             cosolv_xyzs = defaultdict(list)
             # This is used to update the kdtree of the placed cosolvents
             placed_atoms_positions = []
@@ -826,7 +826,7 @@ class CosolventSystem(object):
             for cosolvent in cosolvents:
                 if terminate_early:
                     break  
-                print(f"Attempting to place {cosolvent.copies} copies of {cosolvent.name}")
+                self.logger.info(f"Attempting to place {cosolvent.copies} copies of {cosolvent.name}")
                 c_xyz = cosolvents[cosolvent]
                 while len(cosolv_xyzs[cosolvent]) < cosolvent.copies and not(terminate_early):
                     if len(placed_atoms_positions) < 1:
@@ -844,37 +844,30 @@ class CosolventSystem(object):
                         mol_num = len(cosolv_xyzs[cosolvent])+1
 
                         if isinstance(cosolv_xyz, int):
-                            print("*****************************************************************")
-                            print("Could not place cosolvent molecule %d!" % mol_num)
+                            self.logger.warning("Could not place cosolvent molecule %d!" % mol_num)
                             terminate_early = True 
                             num_autoadjust_attempts += 1
-                            print("Reducing number of cosolvent copies by factor of %.2f" % copies_factor_reduction) 
+                            self.logger.warning("Reducing number of cosolvent copies by factor of %.2f" % copies_factor_reduction) 
                             self.reduce_copies(copies_factor_reduction) 
                         else:
-                            print("Placed cosolvent molecule %d after %d trials" % (mol_num, num_trials))
+                            self.logger.info("Placed cosolvent molecule %d after %d trials" % (mol_num, num_trials))
                             cosolv_xyzs[cosolvent].append(cosolv_xyz*openmmunit.nanometer)
                             [placed_atoms_positions.append(pos) for pos in cosolv_xyz]
                 if terminate_early:
-                    print("Attempting to place cosolvents again with reduced number of copies")
-                    print("*****************************************************************")
+                    self.logger.warning("Attempting to place cosolvents again with reduced number of copies")
                 else:
-                    print(f"Successfully placed {cosolvent.copies} copies of {cosolvent.name}!")
+                    self.logger.info(f"Successfully placed {cosolvent.copies} copies of {cosolvent.name}!")
             if not(terminate_early):
                 break #all cosolvents have been added  
 
         if num_autoadjust_attempts == max_autoadjust_attempts:
-            print("Could not place cosolvents after %d rounds of copies reduction" % max_autoadjust_attempts)
-            print("Exiting..")
+            self.logger.error("Could not place cosolvents after %d rounds of copies reduction" % max_autoadjust_attempts)
             sys.exit(1)
             
-        print("Successfully added all cosolvents:")
+        self.logger.info("Successfully added the following cosolvents:")
         for cosolvent in cosolv_xyzs:
-            print(f"{cosolvent.name}: {len(cosolv_xyzs[cosolvent])}")
+            self.logger.info(f"{cosolvent.name}: {len(cosolv_xyzs[cosolvent])}")
         return cosolv_xyzs
-
-
-
-
     
     def delete_edges_points(self, xyzs, lowerBound, upperBound, distance, used_halton_ids):
         xyzs = np.atleast_2d(xyzs)
@@ -1077,11 +1070,13 @@ class CosolventSystem(object):
         :return: available volume if the cosolvents can fit, None otherwise
         :rtype: Union[float, None]
         """
+
+        self.logger.info(f"Volume of the box: {self.box_volume:.2f} nm^3")
+
         prot_volume = 0
         if self.receptor:
             prot_volume = self.calculate_mol_volume(self.modeller.positions)
-            prot_volume = prot_volume
-            print(f"Volume protein: {prot_volume*1000} A^3")
+            self.logger.info(f"Volume of the protein: {prot_volume:.2f} nm^3")
         empty_volume = self.cubic_nanometers_to_liters(self.box_volume - prot_volume)
         self._copies_from_concentration(empty_volume)
         cosolvs_volume = defaultdict(float)
@@ -1089,8 +1084,8 @@ class CosolventSystem(object):
             cosolvs_volume[cosolvent] = self.calculate_mol_volume(self.cosolvents[cosolvent])*cosolvent.copies
         volume_occupied_by_cosolvent = round(sum(cosolvs_volume.values()), 3)
         empty_available_volume = round(self.liters_to_cubic_nanometers(empty_volume)/2., 3)
-        print(f"Volume requested for cosolvents: {volume_occupied_by_cosolvent} nm**3")
-        print(f"Volume available for cosolvents: {empty_available_volume} nm**3")
+        self.logger.info(f"Volume requested for cosolvents: {volume_occupied_by_cosolvent:.2f} nm^3")
+        self.logger.info(f"Volume available for cosolvents: {empty_available_volume} nm^3")
         if volume_occupied_by_cosolvent > empty_available_volume:
             return None
         return empty_available_volume
@@ -1156,8 +1151,8 @@ class CosolventSystem(object):
             try:
                 molecules.append(Molecule.from_smiles(cosolvent.smiles, name=cosolvent.name))
             except Exception as e:
-                print(e)
-                print(cosolvent)
+                self.logger.info(e)
+                self.logger.info(cosolvent)
         if small_molecule_ff == "espaloma":
             small_ff = EspalomaTemplateGenerator(molecules=molecules, forcefield='espaloma-0.3.2', template_generator_kwargs={"reference_forcefield": "openff_unconstrained-2.1.0", "charge_method": "nn"})
         elif small_molecule_ff == "gaff":
@@ -1211,7 +1206,7 @@ class CosolventSystem(object):
                 self.modeller.add(ligand_topology, ligand_positions)
 
             except Exception as e:
-                print(f'Something went wrong parametrizing {ligname} with {self.small_molecule_forcefield} forcefield\n{e}')
+                self.logger.error(f'Something went wrong parameterizing {ligname} with {self.small_molecule_forcefield} forcefield\n{e}')
                 sys.exit(1)
         return None
 #endregion
@@ -1306,7 +1301,7 @@ class CosolventMembraneSystem(CosolventSystem):
                          modeller=modeller,
                          padding=padding,
                          box_size=box_size)
-        
+
         self.protein_raidus = 1.5 * openmmunit.angstrom
         self.cosolvents_radius = 2.5 * openmmunit.angstrom           
         self.lipid_type = lipid_type
@@ -1316,7 +1311,7 @@ class CosolventMembraneSystem(CosolventSystem):
         self._cosolvent_placement = None
          
         if self.lipid_type is not None and lipid_patch_path is None:
-            assert self.lipid_type in self._available_lipids, print(f"Error! The specified lipid is not supported! Please choose between the following lipid types:\n\t{self._available_lipids}")
+            assert self.lipid_type in self._available_lipids, self.logger.info(f"Error! The specified lipid is not supported! Please choose between the following lipid types:\n\t{self._available_lipids}")
         elif lipid_patch_path is not None and self.lipid_type is None:
             self.lipid_patch = app.PDBFile(lipid_patch_path)
         else:
@@ -1340,11 +1335,11 @@ class CosolventMembraneSystem(CosolventSystem):
         # OpenMM default
         padding = 1 * openmmunit.nanometer
         self._cosolvent_placement = cosolvent_placement
-        if self._cosolvent_placement == 'both': print("No preference on what side of the membrane to place the cosolvents")
-        elif self._cosolvent_placement == 'outside': print("Placing cosolvent molecules outside of the membrane")
-        elif self._cosolvent_placement == 'inside': print("Placing cosolvent molecules inside the membrane")
+        if self._cosolvent_placement == 'both': self.logger.info("No preference on what side of the membrane to place the cosolvents")
+        elif self._cosolvent_placement == 'outside': self.logger.info("Placing cosolvent molecules outside of the membrane")
+        elif self._cosolvent_placement == 'inside': self.logger.info("Placing cosolvent molecules inside the membrane")
         else: 
-            print("Error! Available options for <cosolvent_placement> are ['both' -> no preference, 'outside' -> outside, 'inside' -> inside]")
+            self.logger.error("Error! Available options for <cosolvent_placement> are ['both' -> no preference, 'outside' -> outside, 'inside' -> inside]")
             raise SystemError
         try:
             if self.lipid_type is not None:
@@ -1363,9 +1358,9 @@ class CosolventMembraneSystem(CosolventSystem):
                 waters_to_delete = [atom for atom in self.modeller.topology.atoms() if atom.residue.name in waters_residue_names]
             self.modeller.delete(waters_to_delete)
         except OpenMMException as e:
-            print("Something went wrong during the relaxation of the membrane.\nProbably a problem related to particle's coordinates.")
+            self.logger.info("Something went wrong during the relaxation of the membrane.\nProbably a problem related to particle's coordinates.")
             sys.exit(1)
-        print("Membrane system built.")
+        self.logger.info("Membrane system built.")
         positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)
         minRange = Vec3(*(min((pos[i] for pos in positions)) for i in range(3)))
         maxRange = Vec3(*(max((pos[i] for pos in positions)) for i in range(3)))
@@ -1410,7 +1405,7 @@ class CosolventMembraneSystem(CosolventSystem):
         else:
             upperBound = self.upperBound
             lowerBound = self.lowerBound
-        print("Checking volumes...")
+        self.logger.info("Checking volumes...")
         volume_not_occupied_by_cosolvent = self.fitting_checks()
         assert volume_not_occupied_by_cosolvent is not None, "The requested volume for the cosolvents exceeds the available volume! Please try increasing the padding or box_size."
         receptor_positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)

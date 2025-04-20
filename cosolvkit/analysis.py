@@ -9,6 +9,7 @@
 import os
 import sys
 import json
+import logging
 import numpy as np
 import pandas as pd
 from typing import List, Union
@@ -105,12 +106,12 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300):
     # occupancy = hist / n_frames
     # occupancy_threshold = 0.001
     # hist[occupancy < occupancy_threshold] = 0
-    hist[hist < 2] = 0
+    # hist[hist < 2] = 0
 
     N_o = n_atoms / n_accessible_voxels  # Bulk probability of cosolvent
     N = hist / n_frames  # Local probability in the grid
 
-    # print(f"Min N: {np.min(N)}, Max N: {np.max(N)}, Min N_o: {np.min(N_o)}, Max N_o: {np.max(N_o)}")
+    # self.logger.info(f"Min N: {np.min(N)}, Max N: {np.max(N)}, Min N_o: {np.min(N_o)}, Max N_o: {np.max(N_o)}")
 
     #if hist contains very low values (or zeros), N = hist / n_frames can be much smaller than N_o
     # making log(N / N_o) too negative and gfe extremely large.
@@ -142,7 +143,7 @@ def _smooth_grid_free_energy(gfe,
 
     # Apply Gaussian smoothing AFTER filtering (not sure if this is the best approach)
     gfe_smoothed = gaussian_filter(gfe_filtered, sigma=sigma)
-    # print(f'Energy cutoff is: {energy_cutoff}')
+    # self.logger.info(f'Energy cutoff is: {energy_cutoff}')
 
     # Keep only favorable energy values after smoothing
     # gfe_smoothed[gfe_smoothed >= energy_cutoff] = 0.0
@@ -210,34 +211,7 @@ def _export(fname, grid, gridsize=0.5, center=None, box_size=None):
 
         sub_grid = _subset_grid(grid, center, box_size, gridsize)
         sub_grid.export(fname)
-
-def _load_atomtype_definitions(atomtypes_fname:str=None) -> list:
-    """Loads atom type definitions from a json file.
-    :param atomtypes_fname: Path to the json file with atom type definitions.
-    :type atomtypes_fname: str
-    :return: A list of atom types definitions based on SMARTS patterns.
-    :rtype: list
-    """
-    DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
-    if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
-        print("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
-        try:
-            with open(DARC_default_location) as fi:
-                data = json.load(fi)
-                typer_name = next(iter(data))
-                atomtypes_definitions = data[typer_name]
-                print(f"Loaded {typer_name} atom types definitions.")
-        except FileNotFoundError:
-            print(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
-            sys.exit(1)
-    else:
-        with open(atomtypes_fname) as fi:
-            data = json.load(fi)
-            typer_name = next(iter(data))
-            atomtypes_definitions = data[typer_name]
-            print(f"Loaded {typer_name} atom types definitions.")
-
-    return atomtypes_definitions
+    return
     
 class Analysis(AnalysisBase):
     """Analysis class to generate density grids
@@ -251,6 +225,9 @@ class Analysis(AnalysisBase):
                         atomtypes_definitions:dict=None, 
                         **kwargs):
         super(Analysis, self).__init__(atomgroup.universe.trajectory, **kwargs)
+        
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
 
         self._u = atomgroup.universe
         self._ag = atomgroup
@@ -263,7 +240,7 @@ class Analysis(AnalysisBase):
         self.atomtypes_definitions = atomtypes_definitions
 
         if use_atomtypes and atomtypes_definitions is None:
-            print("Error: Atom types definitions are required for atom type density analysis.")
+            self.logger.error("Error: Atom types definitions are required for atom type density analysis.")
             sys.exit(1)
 
     def _prepare(self):
@@ -308,7 +285,7 @@ class Analysis(AnalysisBase):
                 if atom_type == 'OTHER':
                     continue
 
-                print(f"Processing atom type: {atom_type}")
+                self.logger.info(f"Processing atom type: {atom_type}")
 
                 # Select positions for this atom type
                 mask = np.char.startswith(atom_types_array.astype(str), atom_type)
@@ -317,7 +294,7 @@ class Analysis(AnalysisBase):
 
                 # Skip empty positions for a type
                 if len(type_positions) == 0:
-                    print(f"Skipping atom type {atom_type} as it has no positions.")
+                    self.logger.info(f"Skipping atom type {atom_type} as it has no positions.")
                     continue
 
                 # Generate histogram for this type
@@ -340,6 +317,34 @@ class Analysis(AnalysisBase):
 
         return positions           
     
+    def _load_atomtype_definitions(self, atomtypes_fname:str=None) -> list:
+        """Loads atom type definitions from a json file.
+        :param atomtypes_fname: Path to the json file with atom type definitions.
+        :type atomtypes_fname: str
+        :return: A list of atom types definitions based on SMARTS patterns.
+        :rtype: list
+        """
+        DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
+        if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
+            self.logger.info("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
+            try:
+                with open(DARC_default_location) as fi:
+                    data = json.load(fi)
+                    typer_name = next(iter(data))
+                    atomtypes_definitions = data[typer_name]
+                    self.logger.info(f"Loaded {typer_name} atom types definitions.")
+            except FileNotFoundError:
+                self.logger.info(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
+                sys.exit(1)
+        else:
+            with open(atomtypes_fname) as fi:
+                data = json.load(fi)
+                typer_name = next(iter(data))
+                atomtypes_definitions = data[typer_name]
+                self.logger.info(f"Loaded {typer_name} atom types definitions.")
+
+        return atomtypes_definitions
+    
     def _map_atomtypes(self, atomtypes_definitions:list=None) -> np.ndarray:
         """Maps atom types to their respective categories based on SMARTS patterns.
         Some useful definitions here:  https://www.daylight.com/dayhtml_tutorials/languages/smarts/smarts_examples.html
@@ -353,7 +358,7 @@ class Analysis(AnalysisBase):
         # usually we don't want to include hydrogens in the analysis
         self.atomtypes_dict = {atomtype['atype']: self._ag.select_atoms(f"smarts {atomtype['smarts']} and not name H*") for atomtype in atomtypes_definitions}
         self.atomtypes_dict = {key: np.unique(ag.atoms.types) for key, ag in self.atomtypes_dict.items()}
-        # print(f"Unique atom types in the selection: {self.atomtypes_dict}")
+        # self.logger.info(f"Unique atom types in the selection: {self.atomtypes_dict}")
 
         mapped_atomtypes = np.zeros_like(self._ag.atoms.types, dtype=object)
 
@@ -439,16 +444,18 @@ class Report:
         :param out_path: path to where to save the results.
         :type out_path: str
         """
-        self.statistics = statistics_file
+        
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+
+        self.cosolvent_names = cosolvent_names
+        if cosolvent_names is None or len(cosolvent_names) == 0:
+            self.logger.info("No cosolvents specified for the density analysis. At least one cosolvent is required.")
+            sys.exit(1)
+
         self.trajectory = traj_file
         self.topology = top_file
         self.universe = Universe(self.topology, self.trajectory)
-
-        if cosolvent_names is None or len(cosolvent_names) == 0:
-            print("No cosolvents specified for the density analysis. At least one cosolvent is required.")
-            sys.exit(1)
-
-        self.cosolvent_names = cosolvent_names
 
         self.out_path = out_path
         os.makedirs(self.out_path, exist_ok=True)
@@ -458,6 +465,8 @@ class Report:
         self._volume = None
         self._temperature = None
         self._potential_energy = None
+        
+        self.statistics = statistics_file
         if statistics_file is not None:
             self._potential_energy, self._temperature, self._volume = self._get_temp_vol_pot(self.statistics)
         
@@ -509,7 +518,7 @@ class Report:
         :param align_selection: selection string to align the trajectory to the average.
         :type align_selection: str
         """
-        print("Computing RMSF...")
+        self.logger.info("Computing RMSF...")
         average = align.AverageStructure(self.universe, None,
                                         select=avg_selection,
                                         ).run()
@@ -577,7 +586,7 @@ class Report:
         
         assert candidate_residues is not None, "Error! You need to pass the residues to analyze for the survival probability."
         if cosolvent_names is None:
-            print("No cosolvent specified for the survival probability analysis. Using all cosolvents...")
+            self.logger.warning("No cosolvent specified for the survival probability analysis. Using all cosolvents...")
             cosolvent_names = self.cosolvent_names
 
         for cosolvent_name in cosolvent_names:
@@ -588,9 +597,9 @@ class Report:
                     residue_group = (residue_group,)
                 
                 resids = ' or '.join([f'resid {res}' for res in residue_group])
-                print(f"Analyzing residues: {' '.join([str(i) for i in residue_group])} for cosolvent {cosolvent_name}")
+                self.logger.info(f"Analyzing residues: {' '.join([str(i) for i in residue_group])} for cosolvent {cosolvent_name}")
                 select = f"resname {cosolvent_name} and sphzone {radius} ({resids})"
-                # print(f"Selection string: {select}")
+                # self.logger.info(f"Selection string: {select}")
 
                 sp = SP(self.universe, select, verbose=True)
                 # The default intermittency is continuous (0).
@@ -635,11 +644,11 @@ class Report:
         :param align_selection: selection string to align the trajectory to the average, defaults to "protein and name CA". Change this if you have other molecules in the system or things like DNA/RNA.
         :type align_selection: str, optional
         """
-        print("Generating report...")
+        self.logger.info("Generating report...")
 
         if equilibration:
             if self.statistics is None:
-                print("No statistics file found. Skipping equilibration analysis.")
+                self.logger.warning("No statistics file found. Skipping equilibration analysis.")
             else:
                 self._equilibration_analysis()
         if rmsf:
@@ -670,28 +679,28 @@ class Report:
         :type temperature: float, optional
 
         """
-        print("Generating density maps...")
+        self.logger.info("Generating density maps...")
 
         if cosolvent_names is None or len(cosolvent_names) == 0:
-            print("No cosolvents specified for the density analysis. Using all cosolvents specified in the Report class...")
+            self.logger.warning("No cosolvents specified for the density analysis. Using all cosolvents specified in the Report class...")
             cosolvent_names = self.cosolvent_names
 
         if temperature is None: # If temperature is not passed, so we take the last one from statistics
             if self._temperature is None:
-                print("No temperature found. Please provide a temperature or a statistics file for the density analysis.")
+                self.logger.error("No temperature found. Please provide a temperature or a statistics file for the density analysis.")
                 sys.exit(1)
             else:
-                print(f'No temperature provided. Using the last temperature from the statistics file: {self._temperature[-1]}')
+                self.logger.warning(f'No temperature provided. Using the last temperature from the statistics file: {self._temperature[-1]}')
                 temperature = self._temperature[-1]
 
         # load the atomtypes definitions
         if use_atomtypes:
-            atomtypes_definitions = _load_atomtype_definitions(atomtypes_definitions)
+            atomtypes_definitions = self._load_atomtype_definitions(atomtypes_definitions)
 
         for cosolvent in cosolvent_names:
             atomgroup = self.universe.select_atoms(f"resname {cosolvent}")
             if atomgroup.n_atoms == 0:
-                print("Error: the provided selection didn't match any atoms.")
+                self.logger.error("Error: the provided selection didn't match any atoms.")
                 sys.exit(1)
 
             analysis = Analysis(atomgroup, 
@@ -724,7 +733,7 @@ class Report:
         """Plot equilibration data: potential energy, temperature and volume.
 
         """
-        print('Plotting equilibration data..')
+        self.logger.info('Plotting equilibration data..')
 
         fig, axs = plt.subplots(3, 1, figsize=(12, 6))
 
@@ -762,7 +771,7 @@ class Report:
         outpath = os.path.join(self.out_path, "RDFs")
         os.makedirs(outpath, exist_ok=True)
 
-        print("Running RDF analysis...")
+        self.logger.info("Running RDF analysis...")
 
         wat_resname = "HOH"
         # if top.endswith("cosolv_system.prmtop"):
@@ -781,7 +790,7 @@ class Report:
             for cosolvent_atom in set(atoms_names):
                 max_y = 0
                 if "H" in cosolvent_atom: continue
-                print(f"Analysing {cosolvent_name}-{cosolvent_atom}")
+                self.logger.info(f"Analysing {cosolvent_name}-{cosolvent_atom}")
                 fig, ax = plt.subplots(2, 2, sharex=False, sharey=False)
                 plt.tight_layout(pad=3.0)
                 # Here compute RDF between same atoms and different molecules
@@ -829,7 +838,7 @@ class Report:
                 plt.close()
         
         # Finally do waters
-        print("Analysing water")
+        self.logger.info("Analysing water")
         r_max = 8.5
         fig, ax = plt.subplots()
         plt.setp(ax, xlim=(0, r_max+1))
@@ -918,7 +927,7 @@ class Report:
         elif isinstance(density_files, list):
             pass
         else:
-            print("Please provide a list of density files to include in the PyMol session.")
+            self.logger.error("Please provide a list of density files to include in the PyMol session.")
             return
         
         colors = ['marine', 
@@ -952,12 +961,12 @@ class Report:
 
         for color, density in zip(colors, density_files):
             dens_name = os.path.basename(density).split('.')[0]
-            # print(f"Loading density map: {dens_name}")
+            # self.logger.info(f"Loading density map: {dens_name}")
 
             dx_data = _read_dx(density)
             # calculate 0.001 quantile. This works for agfe maps
             dx_01 = np.quantile(dx_data.grid, 0.001)
-            # print(f"0.1% of the density map is: {dx_01}")
+            # self.logger.info(f"0.1% of the density map is: {dx_01}")
 
             cmd.load(density, f'{dens_name}_map')
             cmd_string += f"cmd.load('{density}', '{dens_name}_map')\n"
@@ -1056,6 +1065,6 @@ class Report:
         with open(output_vmd_file, "w") as f:
             f.write(vmd_script)
 
-        print(f"VMD session script saved as {output_vmd_file}")
+        self.logger.info(f"VMD session script saved as {output_vmd_file}")
         
         return

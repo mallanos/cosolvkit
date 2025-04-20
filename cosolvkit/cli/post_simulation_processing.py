@@ -1,6 +1,7 @@
 import sys
 import argparse
 from cosolvkit.analysis import Report
+from cosolvkit.utils import setup_logging
 
 def cmd_lineparser():
     parser = argparse.ArgumentParser(description="Runs cosolvkit analysis on the output of a MD simulation")
@@ -23,6 +24,9 @@ def main():
     top_file = args.top_file
     out_path = args.out_path
     cosolvents_names = args.cosolvents
+
+    # Set up logging
+    logger = setup_logging(level="INFO", filepath=f"{out_path}/cosolvkit.log")
 
     report = Report(statistics_file, traj_file, top_file, cosolvents_names, out_path)
     report.generate_report(equilibration=True, rmsf=True, rdf=True)
