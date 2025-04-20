@@ -6,7 +6,7 @@
   "clean_protein": true,
   "keep_heterogens": false,
   "variants": {},
-  "repulsive_residues": [],
+  "repulsive_residues": ["BEN", "PRP"],
   "repulsive_epsilon": 0.01,
   "repulsive_sigma": 4.0,
   "solvent_smiles": "H2O",

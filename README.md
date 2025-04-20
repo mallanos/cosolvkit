@@ -138,24 +138,25 @@ One option to align and image trajectories is `cpptraj`. It should be installed
 automatically by the installation instructions above. First we create an input
 file for `cpptraj`, which we will call `process.cpptraj`:
 ```
+parm system.pdb
 trajin trajectory.dcd
-center :1-100@CA
-image
+center :@CA
+autoimage
 reference system.pdb [myref]
-rms ref [myref] :1-100@CA out protein.rmsd
-trajout clean.xtc
+rms ref [myref] @CA out protein.rmsd
+trajout trajectory_aligned.xtc
 ```
 There are two important selections in this input file that are system specific and need to be edited manually, the one for centering
 the trajectory after `center` command, and the one for aligning after `rms`.
 See the [documentation for defining selections](https://amberhub.chpc.utah.edu/atom-mask-selection-syntax/).
 To run it, `system.pdb` needs to be on the working directory:
 ```
-cpptraj -p system.pdb -i process.cpptraj
+cpptraj -i process.cpptraj
 ```
-It will write `clean.xtc`. This trajectory should inspected to make sure the
+It will write `trajectory_aligned.xtc`. This trajectory should inspected to make sure the
 region of interest is not moving or wrapping around the periodic boundaries.
 First, load `system.pdb` into Pymol, and then type the following into
-Pymol's command line: `load_traj clean.xtc, system`.
+Pymol's command line: `load_traj trajectory_aligned.xtc, system`.
 
 An example of another program that can image and center trajectories is
 MDAnalysis. For imaging, see its documentation about
