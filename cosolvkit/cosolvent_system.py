@@ -1244,7 +1244,7 @@ class CosolventSystem(object):
             width = max(2*radius+padding, 2*padding)
         else:
             center = Vec3(0, 0, 0)
-            radius = box_size.value_in_unit(openmmunit.nanometer) / 2
+            radius = box_size.value_in_unit(openmmunit.nanometer)
             maxRange = Vec3(radius, radius, radius)
             minRange = Vec3(-radius, -radius, -radius)
             width = radius
@@ -1315,6 +1315,7 @@ class CosolventMembraneSystem(CosolventSystem):
         elif lipid_patch_path is not None and self.lipid_type is None:
             self.lipid_patch = app.PDBFile(lipid_patch_path)
         else:
+            self.logger.error("Error! <lipid_type> and <lipid_patch_path> are mutually exclusive parameters. Please pass just one of them.")
             raise MutuallyExclusiveParametersError("Error! <lipid_type> and <lipid_patch_path> are mutually exclusive parameters. Please pass just one of them.")
     
     def add_membrane(self, cosolvent_placement: str='both', neutralize: bool=True, waters_to_keep: list=None):
@@ -1358,7 +1359,7 @@ class CosolventMembraneSystem(CosolventSystem):
                 waters_to_delete = [atom for atom in self.modeller.topology.atoms() if atom.residue.name in waters_residue_names]
             self.modeller.delete(waters_to_delete)
         except OpenMMException as e:
-            self.logger.info("Something went wrong during the relaxation of the membrane.\nProbably a problem related to particle's coordinates.")
+            self.logger.error("Something went wrong during the relaxation of the membrane.\nProbably a problem related to particle's coordinates.")
             sys.exit(1)
         self.logger.info("Membrane system built.")
         positions = self.modeller.positions.value_in_unit(openmmunit.nanometer)
