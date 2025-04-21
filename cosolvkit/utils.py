@@ -45,6 +45,12 @@ class MutuallyExclusiveParametersError(Exception):
 #     return
 
 def setup_logging(level:str="INFO", filepath:str=None):
+
+    """Set up logging for the application at the entry point, i.e. cli scripts."""
+    #make sure the directory exists
+    outdir = os.path.dirname(filepath) if filepath else '.'
+    os.makedirs(outdir, exist_ok=True)
+
     logger = logging.getLogger("cosolvkit")
     logger.setLevel(level.upper())
 
