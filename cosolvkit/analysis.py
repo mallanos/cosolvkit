@@ -317,34 +317,6 @@ class Analysis(AnalysisBase):
 
         return positions           
     
-    def _load_atomtype_definitions(self, atomtypes_fname:str=None) -> list:
-        """Loads atom type definitions from a json file.
-        :param atomtypes_fname: Path to the json file with atom type definitions.
-        :type atomtypes_fname: str
-        :return: A list of atom types definitions based on SMARTS patterns.
-        :rtype: list
-        """
-        DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
-        if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
-            self.logger.info("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
-            try:
-                with open(DARC_default_location) as fi:
-                    data = json.load(fi)
-                    typer_name = next(iter(data))
-                    atomtypes_definitions = data[typer_name]
-                    self.logger.info(f"Loaded {typer_name} atom types definitions.")
-            except FileNotFoundError:
-                self.logger.info(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
-                sys.exit(1)
-        else:
-            with open(atomtypes_fname) as fi:
-                data = json.load(fi)
-                typer_name = next(iter(data))
-                atomtypes_definitions = data[typer_name]
-                self.logger.info(f"Loaded {typer_name} atom types definitions.")
-
-        return atomtypes_definitions
-    
     def _map_atomtypes(self, atomtypes_definitions:list=None) -> np.ndarray:
         """Maps atom types to their respective categories based on SMARTS patterns.
         Some useful definitions here:  https://www.daylight.com/dayhtml_tutorials/languages/smarts/smarts_examples.html
@@ -658,6 +630,34 @@ class Report:
    
         return
     
+    def _load_atomtype_definitions(self, atomtypes_fname:str=None) -> list:
+        """Loads atom type definitions from a json file.
+        :param atomtypes_fname: Path to the json file with atom type definitions.
+        :type atomtypes_fname: str
+        :return: A list of atom types definitions based on SMARTS patterns.
+        :rtype: list
+        """
+        DARC_default_location = os.path.join(os.path.dirname(__file__), 'data/dacar_atomtypes.json')
+        if (atomtypes_fname is None) or (not os.path.exists(atomtypes_fname)):
+            self.logger.warning("Warning: Atom types definitions file not found or not provided.\n Using default DACar atom types definitions.")
+            try:
+                with open(DARC_default_location) as fi:
+                    data = json.load(fi)
+                    typer_name = next(iter(data))
+                    atomtypes_definitions = data[typer_name]
+                    self.logger.info(f"Loaded {typer_name} atom types definitions.")
+            except FileNotFoundError:
+                self.logger.error(f"Error: Default DACar atom types definitions not found @ {DARC_default_location}")
+                sys.exit(1)
+        else:
+            with open(atomtypes_fname) as fi:
+                data = json.load(fi)
+                typer_name = next(iter(data))
+                atomtypes_definitions = data[typer_name]
+                self.logger.info(f"Loaded {typer_name} atom types definitions.")
+
+        return atomtypes_definitions
+        
     def generate_density_maps(self, 
                               cosolvent_names:list[str]=None,
                               use_atomtypes:bool=True,
