@@ -69,14 +69,14 @@ def combine_dx_maps(filepaths: List[str] = None, method:str= 'mean', out_fname:s
 
     return combined_grid
 
-def _normalization(data, a:float=None, b:float=None):
+def _normalization(data, a:float=0, b:float=1):
     """_summary_
 
     :param data: list of data points
     :type data: list
-    :param a: int a, defaults to None
+    :param a: int a, defaults to 0
     :type a: int, optional
-    :param b: int b, defaults to None
+    :param b: int b, defaults to 1
     :type b: int, optional
     :return: normalized data
     :rtype: list
@@ -91,7 +91,7 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300):
     Compute the atomic grid free energy (GFE) from a given histogram.
     
     :param hist: Histogram of cosolvent occupancy in each voxel
-    :param n_atoms: Total number of cosolvent atoms (not total system atoms)
+    :param n_atoms: Total number of cosolvent atoms (not total system atoms). Also this is per atom-type
     :param n_frames: Number of frames in the trajectory
     :param temperature: Temperature in Kelvin (default 300K)
     :return: 3D numpy array of free energy values (same shape as `hist`)
@@ -101,6 +101,7 @@ def _grid_free_energy(hist, n_atoms, n_frames, temperature=300):
     # Before the volume_water was calculated as the total volume of the box, but it should be the volume of the solvent region
     # this approximation is not correct, but it is a good starting point
     n_accessible_voxels = np.sum(hist > 0)  # Count nonzero occupancy voxels
+    
 
     # Apply occupancy filtering: remove low-occupancy grid points
     # occupancy = hist / n_frames
@@ -329,8 +330,11 @@ class Analysis(AnalysisBase):
         # select atoms based on SMARTS patterns
         # usually we don't want to include hydrogens in the analysis
         self.atomtypes_dict = {atomtype['atype']: self._ag.select_atoms(f"smarts {atomtype['smarts']} and not name H*") for atomtype in atomtypes_definitions}
+        # Count the number of atoms by type, this is required for the free energy calculation
+        self._n_atoms_by_type = {key: ag.n_atoms for key, ag in self.atomtypes_dict.items()}
+        self.logger.debug(f"Atom types count: {self._n_atoms_by_type}")
+
         self.atomtypes_dict = {key: np.unique(ag.atoms.types) for key, ag in self.atomtypes_dict.items()}
-        # self.logger.info(f"Unique atom types in the selection: {self.atomtypes_dict}")
 
         mapped_atomtypes = np.zeros_like(self._ag.atoms.types, dtype=object)
 
@@ -357,7 +361,8 @@ class Analysis(AnalysisBase):
         
         if self.use_atomtypes:
             for atom_type, grid in self._type_histograms.items():
-                agfe = _grid_free_energy(grid.grid, self._n_atoms, self._nframes, temperature)
+                n_atoms_type = self._n_atoms_by_type[atom_type]
+                agfe = _grid_free_energy(grid.grid, n_atoms_type, self._nframes, temperature)
 
                 if smoothing:
                     agfe = _smooth_grid_free_energy(agfe, sigma=atom_radius / 3., energy_cutoff=0)
