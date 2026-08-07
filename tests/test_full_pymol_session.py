@@ -74,8 +74,9 @@ def _pml(tmp_path, scene, **kw):
     from cosolvkit.analysis.viz.pymol import write_full_session_script
     probe_results, sites = scene
     p = tmp_path / "full_session.pml"
+    kw.setdefault("reference_pdb", None)
     write_full_session_script(probe_results, sites, str(p),
-                              density_dir=str(tmp_path), reference_pdb=None, **kw)
+                              density_dir=str(tmp_path), **kw)
     return p.read_text()
 
 
@@ -150,3 +151,70 @@ def test_paths_are_absolute_so_the_script_replays_from_anywhere(tmp_path, scene)
         if line.startswith("load "):
             path = line.split(" ", 1)[1].split(",")[0].strip()
             assert os.path.isabs(path), f"relative path in .pml: {path}"
+
+
+# ---------------------------------------------------------------------------
+# ground truth from the holo crystals, for side-by-side comparison
+# ---------------------------------------------------------------------------
+
+def _gt():
+    return [
+        dict(site_id=2, rank=1, symmetry_group=2,
+             centroid=(15.358, 30.220, 23.302),
+             copies=[(15.3, 30.2, 23.3), (15.9, 30.8, 23.9)],
+             volume=717.75, n_fragments=23, fragments="A1I4V,PBC,R8P",
+             pdb_ids="9G1D,9G1E", max_occupancy=1.0,
+             lining_residues="A:ALA16;A:GLN23;B:GLY133"),
+        dict(site_id=1, rank=2, symmetry_group=1,
+             centroid=(12.314, 13.959, 19.364),
+             copies=[(12.3, 14.0, 19.4)],
+             volume=532.75, n_fragments=6, fragments="RD4,SZA",
+             pdb_ids="9G1N", max_occupancy=0.678,
+             lining_residues="A:ALA20;A:PHE21"),
+    ]
+
+
+def test_ground_truth_group_with_one_subgroup_per_pocket(tmp_path, scene):
+    s = _pml(tmp_path, scene, ground_truth=_gt())
+    assert "group groundTruth," in s
+    assert "group gt_1," in s and "group gt_2," in s
+    assert "group groundTruth, gt_1 gt_2" in s
+
+
+def test_ground_truth_shows_every_crystallographic_ligand_copy(tmp_path, scene):
+    """Pocket 1 has two ligand instances; a single centroid would hide that."""
+    s = _pml(tmp_path, scene, ground_truth=_gt())
+    assert "gt_1_lig1" in s and "gt_1_lig2" in s
+    assert "gt_2_lig1" in s and "gt_2_lig2" not in s
+
+
+def test_ground_truth_labels_carry_crystal_provenance(tmp_path, scene):
+    s = _pml(tmp_path, scene, ground_truth=_gt())
+    assert "gt_1_lab" in s
+    assert "717" in s or "718" in s        # volume
+    assert "9G1D" in s                     # which PDB entries it came from
+    assert "nfrag" in s
+
+
+def test_lining_residues_become_a_selectable_object(tmp_path, scene):
+    """'A:ALA16;B:GLY133' -> a per-chain PyMol residue selection."""
+    s = _pml(tmp_path, scene, ground_truth=_gt(), reference_pdb="/tmp/ref.pdb")
+    assert "gt_1_lining" in s
+    assert "chain A and resi 16" in s
+    assert "chain B and resi 133" in s
+
+
+def test_lining_object_is_skipped_without_a_reference_structure(tmp_path, scene):
+    """Nothing to carve the residues out of, so it must not emit a broken create."""
+    s = _pml(tmp_path, scene, ground_truth=_gt(), reference_pdb=None)
+    assert "gt_1_lining" not in s
+
+
+def test_ground_truth_is_absent_when_not_supplied(tmp_path, scene):
+    s = _pml(tmp_path, scene)
+    assert "groundTruth" not in s
+
+
+def test_ground_truth_labels_toggle_with_the_rest(tmp_path, scene):
+    s = _pml(tmp_path, scene, ground_truth=_gt())
+    assert "gt_1_lab" in s and "disable *_lab" in s

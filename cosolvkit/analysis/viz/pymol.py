@@ -565,9 +565,43 @@ def _site_label(site):
     ])
 
 
+
+def _lining_selection(lining_residues):
+    """``"A:ALA16;A:GLN23;B:GLY133"`` -> ``(chain A and resi 16+23) or (chain B and resi 133)``.
+
+    Residues are grouped per chain because a flat ``resi 16+23+133`` would also select residue
+    133 of chain A, which is a different residue in a different pocket.
+    """
+    per_chain = {}
+    for tok in str(lining_residues or "").split(";"):
+        tok = tok.strip()
+        if not tok or ":" not in tok:
+            continue
+        chain, rest = tok.split(":", 1)
+        num = "".join(ch for ch in rest if ch.isdigit())
+        if num:
+            per_chain.setdefault(chain.strip(), []).append(num)
+    parts = [f"(chain {c} and resi {'+'.join(n)})" for c, n in sorted(per_chain.items()) if n]
+    return " or ".join(parts)
+
+
+def _gt_label(g):
+    return _fmt_props([
+        ("rank", g.get("rank")),
+        ("site", g.get("site_id")),
+        ("sym", g.get("symmetry_group")),
+        ("vol", g.get("volume")),
+        ("nfrag", g.get("n_fragments")),
+        ("ncopies", len(g.get("copies") or [])),
+        ("occ", g.get("max_occupancy")),
+        ("frags", g.get("fragments")),
+        ("pdbs", g.get("pdb_ids")),
+    ])
+
+
 def write_full_session_script(probe_results, binding_sites, pml_path,
                               density_dir, reference_pdb=None, labels_on=True,
-                              top_n_sites=0, keep_maps=True):
+                              top_n_sites=0, keep_maps=True, ground_truth=None):
     """Emit a .pml building one session with a `hotspots` and a `bindingSites` group.
 
     hotspots/       one subgroup per probe, holding every hotspot's carved density
@@ -580,6 +614,12 @@ def write_full_session_script(probe_results, binding_sites, pml_path,
     ``enable *_lab``. PyMol puts an object in only one group, so a dedicated "labels" group
     would have to take them out of their probe/site groups.
 
+    ground_truth : list[dict], optional
+        Crystallographic pockets to show alongside the predictions, each with ``rank``,
+        ``centroid``, ``copies`` (one xyz per ligand instance) and whatever metadata is
+        available. Every instance is drawn, not just the pocket centroid: a pocket occupied by
+        several fragments is exactly the case where a single point misleads. Rendered in a
+        ``groundTruth`` group so it can be toggled against ``bindingSites``.
     keep_maps : bool
         Keep the full AGFE volumes in the session. They are what makes it re-contourable, and
         also what makes it enormous: 18 probe maps put the FosAKP .pse at 2.4 GB, which most
@@ -672,6 +712,36 @@ def write_full_session_script(probe_results, binding_sites, pml_path,
     if site_groups:
         L.append(f"group bindingSites, {' '.join(site_groups)}\n\n")
 
+    # ---------------- ground truth (holo crystals) ----------------
+    if ground_truth:
+        gt_groups = []
+        for g in sorted(ground_truth, key=lambda d: d.get("rank") or 10**6):
+            rank = g.get("rank")
+            base = f"gt_{rank}"
+            members = []
+            cx, cy, cz = (float(g["centroid"][0]), float(g["centroid"][1]),
+                          float(g["centroid"][2]))
+            for i, c in enumerate(g.get("copies") or [], start=1):
+                nm = f"{base}_lig{i}"
+                L.append(f"pseudoatom {nm}, pos=[{float(c[0]):.3f}, {float(c[1]):.3f}, "
+                         f"{float(c[2]):.3f}]\n")
+                L.append(f"show spheres, {nm}\nset sphere_scale, 0.6, {nm}\n")
+                L.append(f"color firebrick, {nm}\n")
+                members.append(nm)
+            sel = _lining_selection(g.get("lining_residues"))
+            if sel and reference_pdb:
+                struct = os.path.splitext(os.path.basename(reference_pdb))[0]
+                L.append(f"create {base}_lining, {struct} and ({sel})\n")
+                L.append(f"show sticks, {base}_lining\ncolor salmon, {base}_lining\n")
+                members.append(f"{base}_lining")
+            L.append(f"pseudoatom {base}_lab, pos=[{cx:.3f}, {cy:.3f}, {cz:.3f}], "
+                     f"label=\"{_gt_label(g)}\"\n")
+            members.append(f"{base}_lab")
+            L.append(f"group {base}, {' '.join(members)}\n\n")
+            gt_groups.append(base)
+        if gt_groups:
+            L.append(f"group groundTruth, {' '.join(gt_groups)}\n\n")
+
     if not keep_maps:
         L.append("# Maps deleted: the isomeshes above are standalone geometry and remain.\n")
         L.append("# Re-run with keep_maps=True if you need to change contour levels here.\n")
@@ -701,13 +771,14 @@ def _probe_of(hs, probe_results):
 
 def generate_full_session(probe_results, binding_sites, out_path, density_dir,
                           reference_pdb=None, labels_on=True, top_n_sites=0,
-                          keep_maps=True):
+                          keep_maps=True, ground_truth=None):
     """Write the combined session .pml and, when PyMol is importable, the .pse beside it."""
     pml = os.path.join(out_path, "full_session.pml")
     os.makedirs(out_path, exist_ok=True)
     write_full_session_script(probe_results, binding_sites, pml, density_dir,
                               reference_pdb=reference_pdb, labels_on=labels_on,
-                              top_n_sites=top_n_sites, keep_maps=keep_maps)
+                              top_n_sites=top_n_sites, keep_maps=keep_maps,
+                              ground_truth=ground_truth)
     if not _PYMOL_AVAILABLE:
         logger.warning("PyMol unavailable - wrote %s but no .pse", pml)
         return pml
