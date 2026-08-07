@@ -218,3 +218,52 @@ def test_ground_truth_is_absent_when_not_supplied(tmp_path, scene):
 def test_ground_truth_labels_toggle_with_the_rest(tmp_path, scene):
     s = _pml(tmp_path, scene, ground_truth=_gt())
     assert "gt_1_lab" in s and "disable *_lab" in s
+
+
+# ---------------------------------------------------------------------------
+# meshes must be the MASKS that were merged, not carved raw density
+# ---------------------------------------------------------------------------
+
+def test_hotspot_meshes_come_from_the_hotspot_mask(tmp_path, scene):
+    """Carving the raw AGFE map in a sphere shows patchy density that was never part of the
+    hotspot, which is what made merged sites look discontinuous. The mask IS the hotspot."""
+    s = _pml(tmp_path, scene)
+    assert "hs_BEN_r1_mask.dx" in s
+    assert "isomesh hs_BEN_r1_dens, hs_BEN_r1_map, 0.5" in s
+    assert "carve=" not in s.split("# --- probe")[1].split("group hs_")[0]
+
+
+def test_binding_site_shows_the_member_masks_per_probe(tmp_path, scene):
+    """Site 1 merged a BEN and a PHN hotspot: each probe's contribution is its own mask."""
+    s = _pml(tmp_path, scene)
+    assert "bs_1_BEN_mask.dx" in s and "bs_1_PHN_mask.dx" in s
+    assert "isomesh bs_1_BEN, bs_1_BEN_map, 0.5" in s
+
+
+def test_masks_are_cropped_not_full_grid(tmp_path, scene):
+    """A hotspot mask on the full probe grid is ~3.4M voxels; 205 of those is unusable."""
+    from gridData import Grid
+    _pml(tmp_path, scene)
+    g = Grid(str(tmp_path / "hs_BEN_r1_mask.dx"))
+    assert g.grid.size < 5000, f"mask not cropped: {g.grid.shape}"
+    assert g.grid.max() > 0.5, "cropped away the actual mask"
+
+
+def test_hotspots_are_coloured_by_solidity_band(tmp_path, scene):
+    """Green/yellow/red = kept at the aggressive threshold / kept only at the conservative one /
+    discarded by both, so the filter's effect is visible before enabling it."""
+    s = _pml(tmp_path, scene)
+    assert "color solidity_keep, hs_BEN_r1_dens" in s      # 0.81 -> below 0.851
+    assert "color solidity_drop, hs_BEN_r2_dens" in s      # 0.95 -> above 0.910
+    assert "set_color solidity_keep" in s and "set_color solidity_drop" in s
+
+
+def test_solidity_colour_legend_is_documented_in_the_script(tmp_path, scene):
+    s = _pml(tmp_path, scene)
+    assert "0.851" in s and "0.910" in s
+    assert "solidity" in s.lower()
+
+
+def test_a_hotspot_without_solidity_gets_the_neutral_colour(tmp_path, scene):
+    s = _pml(tmp_path, scene)
+    assert "solidity_unknown" in s        # PHN r1 has solidity, BEN r2 has none of sharpness

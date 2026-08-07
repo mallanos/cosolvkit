@@ -599,6 +599,48 @@ def _gt_label(g):
     ])
 
 
+# Solidity bands matching the measured filter thresholds (scripts/sweep_hotspot_filter.py):
+# <=0.851 survives even the aggressive cut, 0.851-0.910 survives only the conservative one,
+# >0.910 is discarded by both. Colouring by band shows the filter's effect before enabling it.
+SOLIDITY_AGGRESSIVE = 0.851
+SOLIDITY_CONSERVATIVE = 0.910
+_SOLIDITY_COLOURS = {
+    "solidity_keep":    (0.15, 0.70, 0.25),   # green  - kept by any threshold
+    "solidity_borderline": (0.95, 0.80, 0.15),  # yellow - kept only by the conservative one
+    "solidity_drop":    (0.85, 0.15, 0.15),   # red    - discarded by both
+    "solidity_unknown": (0.55, 0.55, 0.55),   # grey   - no geom_solidity (regionprops off)
+}
+
+
+def _solidity_colour(props):
+    v = (props or {}).get("geom_solidity")
+    if v is None or not np.isfinite(v):
+        return "solidity_unknown"
+    if v <= SOLIDITY_AGGRESSIVE:
+        return "solidity_keep"
+    if v <= SOLIDITY_CONSERVATIVE:
+        return "solidity_borderline"
+    return "solidity_drop"
+
+
+def _write_cropped_mask_dx(mask, grid_origin, grid_delta, path, pad=1):
+    """Write only the mask's bounding box as a .dx, with the origin shifted to match.
+
+    A hotspot mask lives on its probe's full grid (~150^3 = 3.4M voxels). Writing 205 of those
+    is tens of gigabytes and unopenable; the occupied box is a few hundred voxels.
+    """
+    m = np.asarray(mask, dtype=bool)
+    idx = np.argwhere(m)
+    if idx.size == 0:
+        return None
+    lo = np.maximum(idx.min(axis=0) - pad, 0)
+    hi = np.minimum(idx.max(axis=0) + pad + 1, np.array(m.shape))
+    sub = m[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]].astype(float)
+    origin = np.asarray(grid_origin, float) + lo * np.asarray(grid_delta, float)
+    Grid(sub, origin=origin, delta=np.asarray(grid_delta, float)).export(path)
+    return path
+
+
 def write_full_session_script(probe_results, binding_sites, pml_path,
                               density_dir, reference_pdb=None, labels_on=True,
                               top_n_sites=0, keep_maps=True, ground_truth=None):
@@ -650,25 +692,36 @@ def write_full_session_script(probe_results, binding_sites, pml_path,
         L.append(f"color grey70, {struct}\n\n")
 
     # ---------------- hotspots ----------------
+    L.append("# Hotspot colours = solidity band, i.e. what the shape filter would do:\n")
+    L.append(f"#   green  solidity <= {SOLIDITY_AGGRESSIVE:.3f} : kept by any threshold\n")
+    L.append(f"#   yellow <= {SOLIDITY_CONSERVATIVE:.3f}        : kept only by the conservative one\n")
+    L.append("#   red    above that            : DISCARDED by both\n")
+    L.append("#   grey                          : no geom_solidity (regionprops was off)\n")
+    for nm, (r_, g_, b_) in _SOLIDITY_COLOURS.items():
+        L.append(f"set_color {nm}, [{r_}, {g_}, {b_}]\n")
+    L.append("\n")
+
     probe_groups = []
     for res, hotspots in probe_results.items():
-        dx = os.path.join(density_dir, f"map_agfe_{res}.dx")
-        mapobj = f"map_{res}"
-        dens[res] = mapobj
+        dens[res] = f"map_{res}"
         L.append(f"# --- probe {res} ---\n")
-        L.append(f"load {dx}, {mapobj}\n")
-        members = [mapobj]
+        members = []
         for hs in hotspots:
             base = f"hs_{res}_r{hs.rank}"
             cx, cy, cz = (float(hs.centroid[0]), float(hs.centroid[1]), float(hs.centroid[2]))
-            carve = _site_carve_radius(hs.voxel_mask, hs.grid_delta) if hs.voxel_mask is not None else 5.0
-            L.append(f"pseudoatom {base}_anchor, pos=[{cx:.3f}, {cy:.3f}, {cz:.3f}]\n")
-            L.append(f"isomesh {base}_dens, {mapobj}, -1.0, {base}_anchor, carve={carve:.2f}\n")
+            # The MASK, not the raw map carved in a sphere: the sphere pulls in density that was
+            # never part of this hotspot, which is what made merged sites look discontinuous.
+            mdx = os.path.join(density_dir, f"{base}_mask.dx")
+            if hs.voxel_mask is not None and _write_cropped_mask_dx(
+                    hs.voxel_mask, hs.grid_origin, hs.grid_delta, mdx):
+                L.append(f"load {mdx}, {base}_map\n")
+                L.append(f"isomesh {base}_dens, {base}_map, 0.5\n")
+                L.append(f"color {_solidity_colour(hs.properties)}, {base}_dens\n")
+                members += [f"{base}_map", f"{base}_dens"]
             L.append(f"pseudoatom {base}_lab, pos=[{cx:.3f}, {cy:.3f}, {cz:.3f}], "
                      f"label=\"{_hotspot_label(hs)}\"\n")
-            members += [f"{base}_anchor", f"{base}_dens", f"{base}_lab"]
-        L.append(f"group hs_{res}, {' '.join(members)}\n")
-        L.append(f"disable {mapobj}\n\n")
+            members.append(f"{base}_lab")
+        L.append(f"group hs_{res}, {' '.join(members)}\n\n")
         probe_groups.append(f"hs_{res}")
     if probe_groups:
         L.append(f"group hotspots, {' '.join(probe_groups)}\n\n")
@@ -692,18 +745,32 @@ def write_full_session_script(probe_results, binding_sites, pml_path,
         cx, cy, cz = (float(site.centroid[0]), float(site.centroid[1]), float(site.centroid[2]))
         L.append(f"pseudoatom {base}_anchor, pos=[{cx:.3f}, {cy:.3f}, {cz:.3f}]\n")
         members.append(f"{base}_anchor")
-        # the per-probe densities that were merged into this site
+        # The per-probe contributions that were MERGED into this site: the union of that
+        # probe's member-hotspot masks. Previously this carved the raw AGFE map in a sphere of
+        # the site's radius, which showed unrelated patchy density and made contiguous sites
+        # look broken.
+        by_probe = {}
         for hs in (site.member_hotspots or []):
             res = getattr(hs, "cosolvent", None) or _probe_of(hs, probe_results)
-            if res is None or res not in dens:
+            if res is None or hs.voxel_mask is None:
+                continue
+            by_probe.setdefault(res, []).append(hs)
+        for res, hss in by_probe.items():
+            acc, org, dlt = None, None, None
+            for hs in hss:
+                m = np.asarray(hs.voxel_mask, bool)
+                if acc is None:
+                    acc, org, dlt = m.copy(), hs.grid_origin, hs.grid_delta
+                elif m.shape == acc.shape:
+                    acc |= m
+            if acc is None:
                 continue
             name = f"{base}_{res}"
-            if name in members:
-                continue
-            carve = _site_carve_radius(site.voxel_mask, site.grid_delta) \
-                if site.voxel_mask is not None else 6.0
-            L.append(f"isomesh {name}, {dens[res]}, -1.0, {base}_anchor, carve={carve:.2f}\n")
-            members.append(name)
+            mdx = os.path.join(density_dir, f"{name}_mask.dx")
+            if _write_cropped_mask_dx(acc, org, dlt, mdx):
+                L.append(f"load {mdx}, {name}_map\n")
+                L.append(f"isomesh {name}, {name}_map, 0.5\n")
+                members += [f"{name}_map", name]
         L.append(f"pseudoatom {base}_lab, pos=[{cx:.3f}, {cy:.3f}, {cz:.3f}], "
                  f"label=\"{_site_label(site)}\"\n")
         members.append(f"{base}_lab")
