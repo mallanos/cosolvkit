@@ -43,19 +43,28 @@ def test_default_weights_constant():
     assert DEFAULT_DASHBOARD_WEIGHTS == DEFAULT_BINDING_SITE_WEIGHTS
 
 
-def test_rerank_default_weights_ranks_best_site_first():
+def test_rerank_default_weights_are_shape_dominated():
+    """One term, `shape`, now outweighs every other term a site can win COMBINED.
+
+    This fixture used to pin the opposite: site 1 lost `shape` but won affinity (3.0) +
+    probe_coverage (2.0) + accessible_fraction (2.0) = 7.0 and still ranked first. The
+    2026-08-07 binding-site refit demoted affinity to 1.0 (its sign agreed in only 4 of 6
+    leave-one-pocket-out folds) and zeroed probe_coverage (it shipped at +2.0 while fitting
+    NEGATIVE in 5 of 6 folds), which leaves site 1 with 1.0 + 2.0 = 3.0 against site 2's
+    shape alone at 3.5. The ordering flips.
+
+    Pinned deliberately rather than quietly updated, because it is the sharpest statement of
+    what the default model now is: **shape-dominated**, carrying 3.5 of the 6.5 total weight.
+    A site that is the wrong SHAPE cannot be rescued by being deep and enclosed. If a future
+    fit moves shape below 3.0, this test flips back and should be re-read, not re-flipped.
+    """
     out = rerank_binding_sites(_bs_df(), DEFAULT_DASHBOARD_WEIGHTS)
-    # Under the fitted defaults the non-zero weights are affinity 3.0, shape 3.5,
-    # accessible_fraction 2.0 and probe_coverage 2.0 (volume/kinetics/chemotype_diversity are 0.0).
-    # Site 1 wins affinity + probe_coverage + accessible_fraction = 7.0. It deliberately LOSES
-    # `shape` (3.5), which is scored lower-is-better and site 1 has the higher solidity, so site 2
-    # keeps that term rather than scoring 0.0. Shape now outranking affinity is the fitted result
-    # (3.47 vs 3.00, 13/13 folds agree on the sign), so a site can lose shape and still rank first
-    # only because it wins three other terms.
     r = out.set_index("site_id")
-    assert r.loc[1, "rank"] == 1
-    assert r.loc[2, "rank"] == 2
-    assert r.loc[1, "combined"] == pytest.approx(7.0, abs=1e-9)
+    assert r.loc[2, "rank"] == 1
+    assert r.loc[1, "rank"] == 2
+    # site 1: affinity 1.0 + accessible_fraction 2.0 (probe_coverage now contributes 0.0)
+    assert r.loc[1, "combined"] == pytest.approx(3.0, abs=1e-9)
+    # site 2: shape 3.5, scored lower-is-better, and site 2 has the lower solidity
     assert r.loc[2, "combined"] == pytest.approx(3.5, abs=1e-9)
     # output is sorted by rank ascending
     assert list(out["rank"]) == [1, 2]

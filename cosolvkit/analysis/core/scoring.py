@@ -38,14 +38,30 @@ def _minmax(arr):
 # ---------------------------------------------------------------------------
 
 # Derived from a leave-one-probe-out fit on the 13 FosAKP probes carrying >=3 true sites
-# (`scripts/fit_weights_loo.py`, candidate `tier_b_2026_08` in `scripts/sweep_weights.py`).
+# (`scripts/fit_weights_loo.py`, candidate `tier_b_2026_08` in `scripts/sweep_weights.py`), then
+# revised 2026-08-07 by a leave-one-POCKET-out fit at binding-site level -- the unit these weights
+# are actually applied to (`scripts/fit_weights_binding_sites.py`).
 #
 # ONE TARGET, 6 POCKETS. The SIGNS are the durable part; the MAGNITUDES are provisional and a
 # second target may move them.
+#
+# READ THIS BEFORE TUNING THESE NUMBERS. On FosAKP the site RANKING is insensitive to them:
+# seven weight sets -- including zeroing the largest weight -- gave IDENTICAL top5/top10/median
+# under three different denominators (all 6 pockets / excluding the prep artefact / RT-supported
+# only), and three DIFFERENT single features (shape alone, accessible_fraction alone, kinetics
+# alone) each tie the full model. The features are redundant rather than complementary, so
+# re-weighting is not the lever for ranking; new features are. The changes below are justified by
+# SIGN EVIDENCE and model correctness, NOT by a measured improvement -- there was none to have.
 
 DEFAULT_BINDING_SITE_WEIGHTS = {
     # Most-negative AGFE at the site (lower is better). See _affinity_values.
-    "affinity": 3.0,
+    # DEMOTED 3.0 -> 1.0 (2026-08-07). It fitted at 0.038 with the sign agreeing in only 4 of 6
+    # leave-one-pocket-out folds, and affinity-only is the WORST single-feature ranker on this
+    # target (median rank 12 of 30, vs 6 for shape). It was the joint-largest weight on evidence
+    # that does not support one. Not zeroed: removing it entirely made the held-out AUC slightly
+    # worse (0.653 vs 0.667) and the worst rank worse (27 vs 24), so the reading is "affinity
+    # contributes little", not "affinity is harmful".
+    "affinity": 1.0,
     # Solidity, inverted: real pockets are irregular clefts, i.e. LESS convex. Fitted 3.47 vs
     # affinity's 3.00 after rescaling, with 13/13 folds agreeing on the sign, so shape outranks
     # affinity. Rounded to 3.5.
@@ -56,9 +72,26 @@ DEFAULT_BINDING_SITE_WEIGHTS = {
     # buriedness AND volume. # Inverted: LOWER accessible fraction = more enclosed.
     # Populated only when the detector can find `solvent_accessible_map.dx`; the dead-weight guard
     # in `score_binding_sites` warns if it is weighted but absent.
+    # KEPT at 2.0 and now backed by real pipeline data (2026-08-07). Until then the masks had never
+    # actually been written by a pipeline run, so this weight rested entirely on a retired
+    # ground-truth definition. With the masks regenerated it is the best HOTSPOT feature by a wide
+    # margin (AUC 0.899 vs 0.756 for shape) and fits 6/6 sign-consistent at site level. Two caveats
+    # to carry with that number: ~2/3 of it is burial (0.646 after residualising on burial+volume),
+    # and it is REDUNDANT at binding-site level -- the held-out score is identical with and without
+    # it -- so it earns its weight on hotspots, not on site ranking.
     "accessible_fraction": 2.0,
     # How many PROBES hit the site. Effectively a member count, so biased toward large sites.
-    "probe_coverage": 2.0,
+    # ZEROED 2.0 -> 0.0 (2026-08-07) because the deployed weight had the WRONG SIGN. It is not an
+    # inverted feature, so +2.0 says "more probes = better site", but a leave-one-pocket-out fit
+    # put it at -0.150 with the negative sign agreeing in 5 of 6 folds. That direction is
+    # mechanistically sensible: a member count rewards exactly the sprawling over-merged sites the
+    # grouping already produces, and on this target the best-validated pocket (23 crystallographic
+    # fragments) is hit by only 5 probes while larger false positives are hit by more. Set to 0.0
+    # rather than negative: 5/6 folds on 6 positives is enough to withdraw a wrong-signed weight,
+    # not enough to ship the opposite one. `probe_chemotype_coverage` is the better-behaved
+    # version of this idea (fraction of CLASSES, not a raw count; fitted +0.263 at 6/6) and is the
+    # first thing to try enabling on a second target.
+    "probe_coverage": 0.0,
     # Fitted ~0 with the sign flipping in 3/13 folds -- redundant once shape and enclosure are in,
     # since both already carry size information.
     "volume": 0.0,

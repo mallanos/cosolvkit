@@ -15,9 +15,11 @@ def _bs(site_id, agfe_min, volume, n_cos, residence, solidity, atomtypes):
 
 
 def test_score_binding_sites_default_weights_and_rank():
-    # 2 sites. Defaults (the fitted tier_b set): affinity+3.0, shape+3.5, accessible_fraction+2.0,
-    # probe_coverage+2.0. volume, kinetics and chemotype_diversity are now 0.0 -- see
-    # tests/test_default_weight_coherence.py for why each was zeroed.
+    # 2 sites. Defaults after the 2026-08-07 binding-site refit: affinity+1.0 (demoted from 3.0,
+    # sign agreed in only 4/6 leave-one-pocket-out folds), shape+3.5, accessible_fraction+2.0.
+    # probe_coverage is now 0.0 -- it shipped at +2.0 while fitting NEGATIVE in 5/6 folds, so the
+    # deployed weight had the wrong sign. volume, kinetics and chemotype_diversity are also 0.0 --
+    # see tests/test_default_weight_coherence.py for why each was zeroed.
     # A: agfe_min -3 (best), vol 100, 2 cos (coverage 1.0), residence 20, solidity 0.6, 2 atomtypes
     # B: agfe_min -1 (worst), vol 50, 1 cos (coverage 0.5), residence 10, solidity 0.9, 1 atomtype
     # solidity: A=0.6, B=0.9 — known sites are LESS convex (0.742 vs 0.835 measured), so the
@@ -28,9 +30,10 @@ def test_score_binding_sites_default_weights_and_rank():
     # Every scorable feature: A=1.0, B=0.0 after normalization (A better on all; affinity and
     # shape inverted). These fixtures carry no accessible_fraction (it needs the accessible-volume
     # mask), so its 2.0 contributes nothing here and the dead-weight guard warns; it is covered in
-    # tests/test_accessible_fraction_feature.py.
-    # combined_A = 3.0 + 3.5 + 2.0 = 8.5 ; combined_B = 0.0
-    assert a.combined == pytest.approx(8.5, abs=1e-9)
+    # tests/test_accessible_fraction_feature.py. probe_coverage now contributes nothing either,
+    # being 0.0, which is why A's total dropped from 8.5 to 4.5 when the weights were revised.
+    # combined_A = affinity 1.0 + shape 3.5 = 4.5 ; combined_B = 0.0
+    assert a.combined == pytest.approx(4.5, abs=1e-9)
     assert b.combined == pytest.approx(0.0, abs=1e-9)
     assert a.rank == 1 and b.rank == 2
 
