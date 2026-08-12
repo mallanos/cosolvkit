@@ -133,6 +133,80 @@ def test_unaligned_trajectory_fails_loudly(monkeypatch):
         ann.annotate({"FMD": [_hotspot()]})
 
 
+def test_annotating_twice_is_idempotent(monkeypatch):
+    """The documented workflow is --annotate-only, inspect, then re-run over the
+    checkpoint just written; the scan appends, so a re-run must replace this source's
+    records rather than double them."""
+    u = _universe([[1.25, 1.25, 1.25], [1.25, 1.25, 1.25], [15.0, 15.0, 15.0]])
+    ann, _ = _annotator(monkeypatch, {"r0": u}, contact_cutoff=6.0)
+    h = _hotspot()
+
+    ann.annotate({"FMD": [h]})
+    once = [(o.source_label, o.probe_resname, o.probe_resid, list(o.frames))
+            for o in h.probe_occupancy]
+    once_contacts = [
+        {s: {c: dict(m) for c, m in bp.items()}
+         for s, bp in pr.cosolvent_contacts.items()}
+        for pr in h.pocket_residues
+    ]
+
+    ann.annotate({"FMD": [h]})
+    twice = [(o.source_label, o.probe_resname, o.probe_resid, list(o.frames))
+             for o in h.probe_occupancy]
+    twice_contacts = [
+        {s: {c: dict(m) for c, m in bp.items()}
+         for s, bp in pr.cosolvent_contacts.items()}
+        for pr in h.pocket_residues
+    ]
+
+    assert twice == once, "records were duplicated instead of replaced"
+    assert twice_contacts == once_contacts, "contact frames were appended twice"
+
+
+def test_rescanning_leaves_other_sources_alone(monkeypatch):
+    """Only the (source, cosolvent) pair being rescanned may be dropped."""
+    u0 = _universe([[1.25, 1.25, 1.25], [15.0, 15.0, 15.0]])
+    u1 = _universe([[15.0, 15.0, 15.0], [1.25, 1.25, 1.25]])
+    ann_both, _ = _annotator(monkeypatch, {"r0": u0, "r1": u1})
+    h = _hotspot()
+    ann_both.annotate({"FMD": [h]})
+
+    ann_r0, _ = _annotator(monkeypatch, {"r0": u0})
+    ann_r0.annotate({"FMD": [h]})
+
+    by_source = {o.source_label: o.frames for o in h.probe_occupancy}
+    assert by_source == {"r0": [0], "r1": [1]}, (
+        "rescanning r0 must not delete the r1 record"
+    )
+
+
+def test_second_cosolvent_is_scanned_from_frame_zero(monkeypatch):
+    """The reader is left on the last frame by the previous cosolvent's scan; the grid
+    guard and the pocket-residue search both read the current frame."""
+    import numpy as _np
+
+    from cosolvkit.analysis.sites import occupancy as occ_mod
+
+    u = _universe([[1.25, 1.25, 1.25], [1.25, 1.25, 1.25]])
+    ann, _ = _annotator(monkeypatch, {"r0": u})
+    ann.simulations[0].cosolvents = ["FMD", "OTHER"]
+
+    seen = []
+    real = occ_mod.assert_inside_grid
+
+    def spy(positions, origin, delta, shape, min_fraction=0.5):
+        seen.append(int(u.trajectory.frame))
+        return real(positions, origin, delta, shape, min_fraction)
+
+    monkeypatch.setattr(occ_mod, "assert_inside_grid", spy)
+
+    other = _hotspot()
+    other.cosolvent = "OTHER"
+    ann.annotate({"FMD": [_hotspot()], "OTHER": [other]})
+
+    assert seen == [0, 0], f"the grid guard ran on frames {seen}, not on frame 0 twice"
+
+
 def test_pocket_residues_get_source_keyed_contacts(monkeypatch):
     u = _universe([[1.25, 1.25, 1.25]])
     ann, _ = _annotator(monkeypatch, {"r0": u}, contact_cutoff=6.0)

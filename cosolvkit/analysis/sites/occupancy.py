@@ -125,6 +125,28 @@ class OccupancyAnnotator:
 
     # ------------------------------------------------------------------
 
+    def _drop_previous_records(self, ordered, sim, cosolvent):
+        """Erase any records this (source, cosolvent) pair left behind on a previous run.
+
+        The scan APPENDS, and the documented workflow is ``--annotate-only``, inspect,
+        then re-run over the checkpoint it just wrote — so without this every re-run would
+        silently double the occupancy records and duplicate every contact frame. Only this
+        pair's records are dropped: other sources and other cosolvents are not being
+        rescanned here and must survive untouched.
+        """
+        for h in ordered:
+            h.probe_occupancy = [
+                o for o in h.probe_occupancy
+                if not (o.source_label == sim.label and o.probe_resname == cosolvent)
+            ]
+            for pr in h.pocket_residues:
+                by_probe = pr.cosolvent_contacts.get(sim.label)
+                if not by_probe:
+                    continue
+                by_probe.pop(cosolvent, None)
+                if not by_probe:
+                    pr.cosolvent_contacts.pop(sim.label, None)
+
     def _scan(self, u, sim, cosolvent, hotspots):
         from MDAnalysis.lib.distances import capped_distance, minimize_vectors
 
@@ -132,6 +154,13 @@ class OccupancyAnnotator:
         origin = np.asarray(ordered[0].grid_origin, dtype=float)
         delta = np.asarray(ordered[0].grid_delta, dtype=float)
         shape = np.asarray(label_vol.shape)
+
+        self._drop_previous_records(ordered, sim, cosolvent)
+
+        # The previous cosolvent's scan left the reader on the LAST frame; the grid guard
+        # and the pocket-residue search both read the current frame, so rewind first or
+        # the second and later cosolvents are checked against the wrong coordinates.
+        u.trajectory[0]
 
         protein = u.select_atoms("protein and not name H*")
         assert_inside_grid(protein.positions, origin, delta, label_vol.shape)
