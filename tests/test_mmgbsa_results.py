@@ -251,8 +251,30 @@ REAL_RESULTS = (
 @pytest.mark.skipif(not os.path.isfile(REAL_RESULTS),
                     reason="real FosAKP MMGBSA run not reachable from this machine")
 def test_parse_results_against_the_real_run():
+    """Check the parse against the file's own contents, not a pinned number.
+
+    This file is a real run that gets regenerated whenever the smoke test is re-run with
+    different settings (igb 8 -> 5 moved it from -3.2442 to -3.9864), so hardcoding the
+    energy tests the run rather than the parser.
+    """
     parsed = parse_results(REAL_RESULTS)
-    assert parsed["delta_total"] == pytest.approx(-3.2442)
+
+    expected = {}
+    in_diff = False
+    for line in open(REAL_RESULTS):
+        if line.startswith("Differences (Complex - Receptor - Ligand)"):
+            in_diff = True
+            continue
+        if in_diff and line.strip().startswith("DELTA TOTAL"):
+            expected["total"] = float(line.split()[2])
+        if in_diff and line.strip().startswith("VDWAALS"):
+            expected["vdw"] = float(line.split()[1])
+
+    assert parsed["delta_total"] == pytest.approx(expected["total"])
+    assert parsed["components"]["VDWAALS"]["average"] == pytest.approx(expected["vdw"])
+    for key in ("VDWAALS", "EEL", "EGB", "ESURF"):
+        assert key in parsed["components"], key
+    assert parsed["std_err"] > 0
 
 
 @pytest.mark.skipif(not os.path.isfile(REAL_DECOMP),
