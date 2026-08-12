@@ -10,6 +10,8 @@
 #
 
 import argparse
+import glob
+import json
 import logging
 import os
 
@@ -49,6 +51,13 @@ def build_parser():
                    help="Sampled frames a molecule may miss without ending an episode.")
     p.add_argument("--annotate-only", action="store_true",
                    help="Stop after annotation; write no poses or jobs.")
+    p.add_argument("--collect", action="store_true",
+                   help="Collect finished MMGBSA/decomposition results from "
+                        "<out>/*/mmgbsa/*/ and attach them to the hotspot checkpoint "
+                        "(mmgbsa_delta_total on the Hotspot, per-residue decomposition "
+                        "on its PocketResidues), instead of annotating or generating "
+                        "jobs. Safe to re-run: re-collecting replaces rather than "
+                        "duplicates each result.")
     p.add_argument("--mode", choices=["mmgbsa", "smd", "both"], default="both",
                    help="Which refinement legs to generate (default: both).")
     p.add_argument("--submit", action="store_true",
@@ -145,6 +154,271 @@ def annotate(config, checkpoint_dir, args):
     return results
 
 
+def _cosolvent_list(config):
+    """Every cosolvent named anywhere in the config, in first-seen order."""
+    cosolvents = []
+    for sim in config.simulations:
+        for c in sim.cosolvents:
+            if c not in cosolvents:
+                cosolvents.append(c)
+    return cosolvents
+
+
+def _parse_target_tag(tag):
+    """Invert :func:`cosolvkit.cli.refine_hotspots_jobs.target_tag`.
+
+    :return: ``(is_binding_site, cosolvent_or_none, site_id)``. ``cosolvent`` is
+        ``None`` for a binding-site tag, which carries no cosolvent of its own.
+    :raises ValueError: if *tag* is not one of the two shapes that function writes.
+    """
+    if tag.startswith("bs_"):
+        return True, None, int(tag[len("bs_"):])
+    if tag.startswith("hs_"):
+        rest = tag[len("hs_"):]
+        cosolvent, site_id_str = rest.rsplit("_", 1)
+        return False, cosolvent, int(site_id_str)
+    raise ValueError(f"{tag!r} is not a refine_hotspots target directory name.")
+
+
+def _find_target_hotspot(results, is_bs, cosolvent, site_id, probe_resname, probe_resid,
+                         source_labels):
+    """The :class:`Hotspot` in *results* that owns the molecule an mmgbsa/ job refined.
+
+    Checkpoints only ever persist ``Hotspot`` objects — a binding site is a virtual
+    grouping of them, recomputed at generation time, never itself checkpointed — so a
+    ``bs_*`` job is resolved down to whichever member hotspot actually held this
+    molecule. A hotspot's occupancy is always of its own cosolvent (see
+    ``OccupancyAnnotator._scan``), so *probe_resname* alone narrows the search to
+    ``results[probe_resname]``.
+    """
+    if not is_bs:
+        for h in results.get(cosolvent, []):
+            if h.site_id == site_id:
+                return h
+        return None
+
+    candidates = []
+    for h in results.get(probe_resname, []):
+        occs = [o for o in h.probe_occupancy
+                if o.probe_resname == probe_resname and o.probe_resid == probe_resid]
+        if occs:
+            candidates.append((h, occs))
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0][0]
+
+    scored = sorted(
+        candidates,
+        key=lambda hc: (
+            -len({o.source_label for o in hc[1]} & set(source_labels)),
+            -sum(o.n_frames_bound for o in hc[1]),
+        ),
+    )
+    logger.warning(
+        "%s %d occupies %d hotspots of cosolvent %s; attaching to site_id %d (best "
+        "source-label / frame-count match).",
+        probe_resname, probe_resid, len(candidates), probe_resname,
+        scored[0][0].site_id,
+    )
+    return scored[0][0]
+
+
+def _representative_occupancy(hotspot, probe_resname, probe_resid):
+    """The occupancy record ``_build_mmgbsa_inputs`` would have used as ``occ``.
+
+    Same tie-break as ``select_mmgbsa_jobs``'s ``representative`` — reproducing it is
+    what lets this reconstruct the correct source topology and strip-mask inputs for a
+    job that may have pooled frames from several source records of the same molecule.
+    """
+    occs = [o for o in hotspot.probe_occupancy
+            if o.probe_resname == probe_resname and o.probe_resid == probe_resid]
+    if not occs:
+        return None
+    return max(occs, key=lambda o: (o.n_frames_bound, o.source_label))
+
+
+def _attach_mmgbsa_result(hotspot, result):
+    """Add *result* to the hotspot, replacing any earlier result from the same file.
+
+    Keyed on ``results_path`` (one file per molecule per job) rather than appended
+    unconditionally, so re-running ``--collect`` on the same jobs does not duplicate.
+    """
+    hotspot.mmgbsa = [r for r in hotspot.mmgbsa if r.results_path != result.results_path]
+    hotspot.mmgbsa.append(result)
+
+
+def _attach_decomposition(hotspot, df):
+    """Write matching rows of *df* onto this hotspot's PocketResidues, by ORIGINAL resid.
+
+    Assignment, not append: re-collecting overwrites a residue's previous
+    decomposition rather than accumulating it.
+    """
+    if df is None or not hotspot.pocket_residues:
+        return
+    group_cols = [c for c in df.columns if c.endswith("_Avg")]
+    by_resid = {int(row["resid"]): row for _, row in df.iterrows()}
+    for pr in hotspot.pocket_residues:
+        row = by_resid.get(int(pr.resid))
+        if row is None:
+            continue
+        pr.mmgbsa_decomposition = {
+            col[:-len("_Avg")]: {
+                "average": float(row[col]),
+                "std_dev": float(row[f"{col[:-len('_Avg')]}_StdDev"]),
+                "std_err": float(row[f"{col[:-len('_Avg')]}_StdErr"]),
+            }
+            for col in group_cols
+        }
+        pr.mmgbsa_location = str(row["location"])
+
+
+def collect_results(config, checkpoint_dir, out_dir):
+    """Walk finished MMGBSA jobs under *out_dir* and attach them to the checkpoint.
+
+    Reads every ``<out_dir>/<tag>/mmgbsa/<PROBE><resid>/`` directory ``generate_jobs``
+    could have written, skipping (with a log line, not an error) any that have not
+    finished MMPBSA yet. Writes ``mmgbsa_results.csv`` (one row per molecule refined)
+    and ``mmgbsa_decomposition.csv`` (one row per residue per result, carrying both the
+    stripped-complex index and the mapped ORIGINAL resid so the mapping stays
+    auditable), and re-saves the hotspot checkpoint with the results attached.
+
+    Idempotent: re-running replaces each hotspot's earlier result for the same
+    ``results_path`` rather than appending a duplicate — the same principle
+    :func:`annotate` uses for occupancy.
+
+    :return: the updated ``{cosolvent: [Hotspot]}``.
+    """
+    from cosolvkit.analysis.sites.mmgbsa_results import (
+        collect_decomposition, collect_job, parse_probe_dirname, parse_strip_mask,
+        read_strip_mask,
+    )
+
+    results = HotspotDetector.load_checkpoint(checkpoint_dir, _cosolvent_list(config))
+
+    import MDAnalysis as mda
+
+    result_rows = []
+    decomp_rows = []
+
+    tag_dirs = sorted(d for d in glob.glob(os.path.join(out_dir, "*"))
+                      if os.path.isdir(os.path.join(d, "mmgbsa")))
+
+    for tag_dir in tag_dirs:
+        tag = os.path.basename(tag_dir)
+        try:
+            is_bs, cosolvent, site_id = _parse_target_tag(tag)
+        except ValueError as exc:
+            logger.warning("Skipping %s: %s", tag_dir, exc)
+            continue
+
+        for job_dir in sorted(glob.glob(os.path.join(tag_dir, "mmgbsa", "*"))):
+            if not os.path.isdir(job_dir):
+                continue
+            try:
+                probe_resname, probe_resid = parse_probe_dirname(
+                    os.path.basename(job_dir))
+            except ValueError as exc:
+                logger.warning("Skipping %s: %s", job_dir, exc)
+                continue
+
+            source_labels = []
+            frames_json = os.path.join(job_dir, "frames.json")
+            if os.path.isfile(frames_json):
+                with open(frames_json) as fh:
+                    source_labels = [f["source_label"]
+                                     for f in json.load(fh).get("frames", [])]
+
+            hotspot = _find_target_hotspot(results, is_bs, cosolvent, site_id,
+                                           probe_resname, probe_resid, source_labels)
+            if hotspot is None:
+                logger.warning(
+                    "%s: no hotspot in the checkpoint occupies %s %d; skipping.",
+                    job_dir, probe_resname, probe_resid,
+                )
+                continue
+
+            representative = _representative_occupancy(hotspot, probe_resname,
+                                                        probe_resid)
+            if representative is None:
+                logger.warning(
+                    "%s: hotspot site_id=%s has no occupancy record for %s %d; "
+                    "skipping.", job_dir, hotspot.site_id, probe_resname, probe_resid,
+                )
+                continue
+
+            result = collect_job(job_dir, probe_resname, probe_resid,
+                                 representative.source_label)
+            if result is None:
+                continue
+
+            _attach_mmgbsa_result(hotspot, result)
+            result_rows.append({
+                "tag": tag,
+                "target_type": "binding_site" if is_bs else "hotspot",
+                "hotspot_site_id": hotspot.site_id,
+                "cosolvent": hotspot.cosolvent,
+                "probe_resname": result.probe_resname,
+                "probe_resid": result.probe_resid,
+                "source_label": result.source_label,
+                "delta_total": result.delta_total,
+                "std_dev": result.std_dev,
+                "std_err": result.std_err,
+                "n_frames": result.n_frames,
+                "results_path": result.results_path,
+            })
+
+            try:
+                strip_resnames, excluded_resids = parse_strip_mask(
+                    read_strip_mask(job_dir))
+            except (FileNotFoundError, ValueError) as exc:
+                logger.warning(
+                    "%s: cannot read strip_mask (%s); skipping decomposition.",
+                    job_dir, exc,
+                )
+                continue
+
+            universe = mda.Universe(representative.topology)
+            try:
+                df = collect_decomposition(job_dir, universe, strip_resnames,
+                                           excluded_resids)
+            except ValueError:
+                logger.exception("%s: decomposition mapping failed; skipping.", job_dir)
+                continue
+            if df is None:
+                continue
+
+            _attach_decomposition(hotspot, df)
+            value_cols = [c for c in df.columns
+                         if c.endswith(("_Avg", "_StdDev", "_StdErr"))]
+            for _, row in df.iterrows():
+                decomp_rows.append({
+                    "tag": tag,
+                    "target_type": "binding_site" if is_bs else "hotspot",
+                    "hotspot_site_id": hotspot.site_id,
+                    "cosolvent": hotspot.cosolvent,
+                    "probe_resname": probe_resname,
+                    "probe_resid": probe_resid,
+                    "resname": row["resname"],
+                    "stripped_resid": int(row["stripped_resid"]),
+                    "resid": int(row["resid"]),
+                    "location": row["location"],
+                    **{c: row[c] for c in value_cols},
+                })
+
+    HotspotDetector.save_checkpoint(results, checkpoint_dir)
+
+    results_csv = os.path.join(out_dir, "mmgbsa_results.csv")
+    pd.DataFrame(result_rows).to_csv(results_csv, index=False)
+    logger.info("Wrote %d MMGBSA result(s) to %s.", len(result_rows), results_csv)
+
+    decomp_csv = os.path.join(out_dir, "mmgbsa_decomposition.csv")
+    pd.DataFrame(decomp_rows).to_csv(decomp_csv, index=False)
+    logger.info("Wrote %d decomposition row(s) to %s.", len(decomp_rows), decomp_csv)
+
+    return results
+
+
 def main(argv=None):
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -157,6 +431,10 @@ def main(argv=None):
                                         or os.path.join(config.out_path, "merged"))
     out_dir = args.out or os.path.join(config.out_path, "refine")
     os.makedirs(out_dir, exist_ok=True)
+
+    if args.collect:
+        collect_results(config, checkpoint_dir, out_dir)
+        return 0
 
     results = annotate(config, checkpoint_dir, args)
 

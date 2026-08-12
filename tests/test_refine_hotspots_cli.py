@@ -34,6 +34,7 @@ def test_defaults_match_the_spec():
     assert args.seed == 0
     assert args.submit is False
     assert args.annotate_only is False
+    assert args.collect is False
 
 
 def test_config_is_required():
