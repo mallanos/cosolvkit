@@ -167,8 +167,10 @@ class PocketResidue:
     embedding_model : str or None
         Name of the model that produced ``embedding``.
     cosolvent_contacts : dict
-        ``{cosolvent_name: {cosolvent_resid: [frame_index, ...]}}`` — sorted frames in
-        which each cosolvent molecule was within the contact cutoff of this residue.
+        ``{source_label: {cosolvent_name: {cosolvent_resid: [frame_index, ...]}}}``.
+        Source-keyed because a frame index is ambiguous across replicas.
+    chain_source : str
+        Where ``chain`` came from — ``"topology"`` (segid) or ``"chain_reference"``.
     properties : dict
         Extensible bag for arbitrary extra scalar properties.
     """
@@ -185,28 +187,40 @@ class PocketResidue:
     embedding:       Optional[np.ndarray]  = None
     embedding_model: Optional[str]         = None
 
-    cosolvent_contacts: Dict[str, Dict[int, List[int]]] = field(
+    cosolvent_contacts: Dict[str, Dict[str, Dict[int, List[int]]]] = field(
         default_factory=dict
     )
+    chain_source: str = "topology"     # "topology" | "chain_reference"
     properties: Dict[str, Any] = field(default_factory=dict)
 
-    def contact_frames(self, cosolvent_name: str) -> List[int]:
-        """Sorted union of frames where ANY molecule of *cosolvent_name* contacted this residue."""
-        mol_dict = self.cosolvent_contacts.get(cosolvent_name, {})
-        all_frames: set = set()
-        for frames in mol_dict.values():
-            all_frames.update(frames)
+    def _iter_sources(self, source=None):
+        """Yield the ``{resname: {resid: frames}}`` maps for one source, or all of them."""
+        if source is None:
+            return list(self.cosolvent_contacts.values())
+        entry = self.cosolvent_contacts.get(source)
+        return [entry] if entry is not None else []
+
+    def contact_frames(self, cosolvent_name: str, source=None) -> List[int]:
+        """Sorted frames where any molecule of *cosolvent_name* contacted this residue."""
+        all_frames = set()
+        for by_probe in self._iter_sources(source):
+            for frames in by_probe.get(cosolvent_name, {}).values():
+                all_frames.update(frames)
         return sorted(all_frames)
 
-    def contact_resids(self, cosolvent_name: str) -> List[int]:
-        """Sorted list of cosolvent molecule resids that ever contacted this residue."""
-        return sorted(self.cosolvent_contacts.get(cosolvent_name, {}).keys())
+    def contact_molecules(self, cosolvent_name: str, source=None) -> List[int]:
+        """Sorted resids of the molecules that ever contacted this residue."""
+        resids = set()
+        for by_probe in self._iter_sources(source):
+            resids.update(by_probe.get(cosolvent_name, {}).keys())
+        return sorted(resids)
 
-    def n_contact_events(self, cosolvent_name: str) -> int:
-        """Total (molecule, frame) pairs — proxy for raw contact frequency."""
+    def n_contact_events(self, cosolvent_name: str, source=None) -> int:
+        """Total (molecule, frame) pairs — a proxy for raw contact frequency."""
         return sum(
             len(frames)
-            for frames in self.cosolvent_contacts.get(cosolvent_name, {}).values()
+            for by_probe in self._iter_sources(source)
+            for frames in by_probe.get(cosolvent_name, {}).values()
         )
 
     def to_dict(self) -> dict:
@@ -225,9 +239,13 @@ class PocketResidue:
                 else None
             ),
             "embedding_model": self.embedding_model,
+            "chain_source": self.chain_source,
             "cosolvent_contacts": {
-                cosolvent: {str(rid): frames for rid, frames in mol_dict.items()}
-                for cosolvent, mol_dict in self.cosolvent_contacts.items()
+                source: {
+                    cosolvent: {str(rid): frames for rid, frames in mol_dict.items()}
+                    for cosolvent, mol_dict in by_probe.items()
+                }
+                for source, by_probe in self.cosolvent_contacts.items()
             },
             "properties": self.properties,
         }
@@ -250,10 +268,14 @@ class PocketResidue:
             np.array(emb, dtype=np.float32) if emb is not None else None
         )
         pr.embedding_model = d.get("embedding_model")
+        pr.chain_source = str(d.get("chain_source", "topology"))
         raw = d.get("cosolvent_contacts", {})
         pr.cosolvent_contacts = {
-            cosolvent: {int(rid): list(frames) for rid, frames in mol_dict.items()}
-            for cosolvent, mol_dict in raw.items()
+            source: {
+                cosolvent: {int(rid): list(frames) for rid, frames in mol_dict.items()}
+                for cosolvent, mol_dict in by_probe.items()
+            }
+            for source, by_probe in raw.items()
         }
         pr.properties = dict(d.get("properties", {}))
         return pr
