@@ -354,3 +354,43 @@ def test_missing_maps_are_warned_about_by_name(tmp_path, monkeypatch, caplog):
     assert "binding_sites.csv" in caplog.text, (
         "the warning must name the consequence, not just the missing file"
     )
+
+
+# ---------------------------------------------------------------------------
+# Interpreter pinning — found by a real SLURM smoke test, where a bare `python`
+# on the compute node resolved to a base install with no MDAnalysis.
+# ---------------------------------------------------------------------------
+
+def test_slurm_script_pins_an_absolute_interpreter():
+    """A bare `python` resolves against the node's PATH and dies on import."""
+    from cosolvkit.cli.refine_hotspots_jobs import _slurm_script
+
+    script = _slurm_script("bs_1", "/jobs/bs_1/run_autopath.py",
+                           workdir="/jobs/bs_1", mode="mmgbsa",
+                           python_exe="/envs/autopath/bin/python")
+    run_line = [l for l in script.splitlines()
+                if l.strip().endswith("run_autopath.py")][0]
+    assert run_line.startswith("/envs/autopath/bin/python "), run_line
+    assert not run_line.startswith("python "), "bare python would use the node default"
+
+
+def test_slurm_script_defaults_to_the_running_interpreter():
+    import sys
+
+    from cosolvkit.cli.refine_hotspots_jobs import _slurm_script
+
+    script = _slurm_script("bs_1", "/jobs/bs_1/run_autopath.py",
+                           workdir="/jobs/bs_1", mode="mmgbsa")
+    assert f"{sys.executable} /jobs/bs_1/run_autopath.py" in script
+
+
+def test_slurm_template_gets_the_python_placeholder(tmp_path):
+    from cosolvkit.cli.refine_hotspots_jobs import _slurm_script
+
+    tpl = tmp_path / "tpl.q"
+    tpl.write_text("#!/bin/bash\ncd {{WORKDIR}}\n{{PYTHON}} {{SCRIPT}}\n")
+    script = _slurm_script("bs_1", "/jobs/bs_1/run_autopath.py",
+                           template_path=str(tpl), workdir="/jobs/bs_1",
+                           mode="mmgbsa", python_exe="/envs/autopath/bin/python")
+    assert "/envs/autopath/bin/python /jobs/bs_1/run_autopath.py" in script
+    assert "{{PYTHON}}" not in script

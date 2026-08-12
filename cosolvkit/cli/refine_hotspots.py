@@ -54,9 +54,13 @@ def build_parser():
     p.add_argument("--submit", action="store_true",
                    help="sbatch the generated qfiles instead of only writing them.")
     p.add_argument("--slurm-template", default=None,
-                   help="Optional SLURM template file. Placeholders {{NAME}}, {{SCRIPT}} "
-                        "and {{WORKDIR}} are substituted; a template must cd to "
-                        "{{WORKDIR}} itself. Omitted, a built-in block is written.")
+                   help="Optional SLURM template file. Placeholders {{NAME}}, {{SCRIPT}}, "
+                        "{{WORKDIR}} and {{PYTHON}} are substituted; a template must cd "
+                        "to {{WORKDIR}} itself. Omitted, a built-in block is written.")
+    p.add_argument("--python-exe", dest="python_exe", default=None,
+                   help="Interpreter the generated SLURM jobs run (default: the one "
+                        "running this command). Must be able to import autopath and "
+                        "MDAnalysis; a bare 'python' on a compute node usually cannot.")
     p.add_argument("--mmgbsa-n-frames", type=int, default=20,
                    help="Frames to extract per MMGBSA job (default: 20).")
     p.add_argument("--mmgbsa-n-molecules", type=int, default=1,

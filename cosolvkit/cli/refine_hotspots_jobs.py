@@ -9,6 +9,7 @@
 import logging
 import os
 import subprocess
+import sys
 
 import numpy as np
 
@@ -222,7 +223,8 @@ def render_autopath_script(manifest, mmgbsa, mode):
     return "\n".join(lines)
 
 
-def _slurm_script(tag, script_path, template_path=None, workdir=None, mode="both"):
+def _slurm_script(tag, script_path, template_path=None, workdir=None, mode="both",
+                  python_exe=None):
     """Render the qfile that runs one target's driver.
 
     The ``cd`` is not cosmetic. AutoPath derives its system name from the PDB basename
@@ -232,15 +234,21 @@ def _slurm_script(tag, script_path, template_path=None, workdir=None, mode="both
     so without the ``cd`` all N jobs would resolve to the same ``./pose_fixed/`` under
     the submit directory and clobber each other's ``system.pdb``, ``equilibration/``
     and ``sMD/``.
+
+    The interpreter is pinned to an absolute path, defaulting to the one running this
+    CLI. A bare ``python`` resolves against the compute node's PATH, which is typically
+    a base install without MDAnalysis or autopath, so the job would die on import.
     """
     workdir = os.path.abspath(workdir) if workdir else os.path.dirname(
         os.path.abspath(script_path))
+    python_exe = python_exe or sys.executable
     if template_path:
         with open(template_path) as fh:
             return (fh.read()
                     .replace("{{SCRIPT}}", script_path)
                     .replace("{{NAME}}", tag)
-                    .replace("{{WORKDIR}}", workdir))
+                    .replace("{{WORKDIR}}", workdir)
+                    .replace("{{PYTHON}}", python_exe))
 
     lines = [
         "#!/bin/bash",
@@ -271,7 +279,9 @@ def _slurm_script(tag, script_path, template_path=None, workdir=None, mode="both
         "# directory; without this cd every target would collide in the submit dir.",
         f"cd {workdir} || exit 1",
         "",
-        f"python {script_path}",
+        "# Absolute interpreter: a bare `python` on a compute node is usually a base",
+        "# install with no MDAnalysis and no autopath, and the job dies on import.",
+        f"{python_exe} {script_path}",
         "",
     ]
     return "\n".join(lines)
@@ -310,7 +320,8 @@ def generate_jobs(config, results, out_dir, args):
         qfile = os.path.join(tag_dir, "job.slurm")
         with open(qfile, "w") as fh:
             fh.write(_slurm_script(tag, script_path, args.slurm_template,
-                                   workdir=tag_dir, mode=args.mode))
+                                   workdir=tag_dir, mode=args.mode,
+                                   python_exe=getattr(args, "python_exe", None)))
         qfiles.append(qfile)
 
     master = os.path.join(out_dir, "submit_all.sh")
