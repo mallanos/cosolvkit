@@ -1,9 +1,15 @@
 # cosolvkit analysis configuration — example 03
 #
 # Chains off examples 01 (build) and 02 (equilibration + production). It reads the
-# aligned production trajectory from example 02 and the topology (system.pdb) from
+# aligned production trajectory from example 02 and the topology (system.prmtop) from
 # example 01, builds AGFE density maps, and detects hotspots for the benzene +
 # imidazole probes.
+#
+# Topology is the PRMTOP, not system.pdb. The PDB's 4-character resid field wraps, so
+# in this very system it gives 9,803 unique resids for 10,770 residues (967 collisions)
+# and numbers benzene 777-819 where the prmtop says 778-820. Any resid-based selection
+# is then unreliable, which matters for pocket residues, contacts and MMGBSA masks.
+# chain_reference supplies the chain IDs a prmtop does not carry.
 #
 # All file paths are resolved relative to THIS config file's directory.
 # Regenerate the full, fully-commented template with:
@@ -17,12 +23,14 @@ out_path: "results"
 # -----------------------------------------------------------------
 simulations:
   - trajectory: "../02_equilibration-and-production/6E22_benzene/MD/MD_6E22_benzene_rep1_aligned.dcd"
-    topology:   "../01_build_cosolvent_system/6E22_benzene/system.pdb"
+    topology:   "../01_build_cosolvent_system/6E22_benzene/system.prmtop"
+    chain_reference: "../01_build_cosolvent_system/6E22_benzene/system.pdb"
     cosolvents: ["BEN"]            # benzene residue name
     label:      "benzene_rep1"     # names the per-sim output subdir
 
   - trajectory: "../02_equilibration-and-production/6E22_imidazole/MD/MD_6E22_imidazole_rep1_aligned.dcd"
-    topology:   "../01_build_cosolvent_system/6E22_imidazole/system.pdb"
+    topology:   "../01_build_cosolvent_system/6E22_imidazole/system.prmtop"
+    chain_reference: "../01_build_cosolvent_system/6E22_imidazole/system.pdb"
     cosolvents: ["IMI"]            # imidazole residue name
     label:      "imidazole_rep1"   # names the per-sim output subdir
 
