@@ -625,3 +625,52 @@ def test_input_and_driver_carry_the_chosen_igb_and_radii(tmp_path):
     script = render_autopath_script(manifest, specs, "mmgbsa")
     assert "radii='mbondi2'" in script
     assert "mbondi3" not in script
+
+
+# ---------------------------------------------------------------------------
+# Relative --out. Found by running example 04 end to end: the qfile cds into the
+# target dir and then ran a RELATIVE driver path, producing
+# <out>/bs_1/<out>/bs_1/run_autopath.py and failing every job instantly.
+# ---------------------------------------------------------------------------
+
+def test_relative_out_dir_still_yields_absolute_paths(tmp_path, monkeypatch):
+    from cosolvkit.cli.refine_hotspots_jobs import generate_jobs
+
+    sim = _system(tmp_path)
+    (tmp_path / "refine").mkdir()
+    monkeypatch.chdir(tmp_path)          # so "refine" is genuinely relative
+    results = {"FMD": [_hotspot(_occ(sim, 5, 4))]}
+
+    qfiles = generate_jobs(_config([sim]), results, "refine", _args())
+
+    assert len(qfiles) == 1
+    body = open(qfiles[0]).read()
+    cd_line = next(l for l in body.splitlines() if l.startswith("cd "))
+    run_line = next(l for l in body.splitlines() if l.strip().endswith(".py"))
+    workdir = cd_line.split(None, 1)[1].split(" ||")[0]
+    script = run_line.split()[-1]
+
+    assert os.path.isabs(workdir), cd_line
+    assert os.path.isabs(script), run_line
+    # The bug: script path resolved under the cd'd workdir instead of being absolute.
+    assert os.path.isfile(script), f"{script} does not exist -> path was doubled"
+    assert script.startswith(workdir), "the driver should live inside the workdir"
+    assert "refine" in script and script.count("refine") == 1, \
+        f"out_dir appears twice in {script}"
+
+
+def test_relative_out_dir_keeps_mmgbsa_paths_absolute(tmp_path, monkeypatch):
+    """prepare_mmgbsa_batch also runs after the cd, so its paths must survive it."""
+    from cosolvkit.cli.refine_hotspots_jobs import _build_mmgbsa_inputs
+
+    sim = _system(tmp_path, cosolvents=("FMD",))
+    (tmp_path / "refine" / "hs_FMD_12").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    specs = _build_mmgbsa_inputs(_config([sim]), _hotspot(_occ(sim, 5, 4)),
+                                 "hs_FMD_12", os.path.abspath("refine/hs_FMD_12"),
+                                 _args())
+
+    for key in ("trajectory", "mmpbsa_in", "output_folder", "prmtop"):
+        assert os.path.isabs(specs[0][key]), f"{key} is relative: {specs[0][key]}"
+    assert os.path.isfile(specs[0]["trajectory"])
+    assert os.path.isfile(specs[0]["mmpbsa_in"])

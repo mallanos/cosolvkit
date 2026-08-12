@@ -438,7 +438,12 @@ def main(argv=None):
     # same directory the hotspots were loaded from.
     args.checkpoint = checkpoint_dir = (args.checkpoint
                                         or os.path.join(config.out_path, "merged"))
-    out_dir = args.out or os.path.join(config.out_path, "refine")
+    # Absolute from here on. The generated SLURM script cds into the target directory
+    # before running the driver, so a relative --out would resolve the driver path
+    # against the new working directory and double it
+    # (<out>/bs_1/<out>/bs_1/run_autopath.py). Every path baked into a generated file
+    # has to survive that cd.
+    out_dir = os.path.abspath(args.out or os.path.join(config.out_path, "refine"))
     os.makedirs(out_dir, exist_ok=True)
 
     if args.collect:

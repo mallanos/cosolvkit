@@ -292,8 +292,8 @@ def _slurm_script(tag, script_path, template_path=None, workdir=None, mode="both
     CLI. A bare ``python`` resolves against the compute node's PATH, which is typically
     a base install without MDAnalysis or autopath, so the job would die on import.
     """
-    workdir = os.path.abspath(workdir) if workdir else os.path.dirname(
-        os.path.abspath(script_path))
+    script_path = os.path.abspath(script_path)
+    workdir = os.path.abspath(workdir) if workdir else os.path.dirname(script_path)
     python_exe = python_exe or sys.executable
     if template_path:
         with open(template_path) as fh:
@@ -345,6 +345,10 @@ def generate_jobs(config, results, out_dir, args):
 
     :return: paths of the generated SLURM qfiles, in the order they were written.
     """
+    # Defensive: every path written into a generated script must be absolute, because
+    # the qfile cds into the target directory first. A relative out_dir would otherwise
+    # resolve against that new cwd and double (<out>/bs_1/<out>/bs_1/run_autopath.py).
+    out_dir = os.path.abspath(out_dir)
     targets = _rank_targets(config, results, args)
     qfiles = []
 
