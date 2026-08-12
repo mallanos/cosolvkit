@@ -42,7 +42,7 @@ def test_one_job_per_molecule_best_first():
     jobs = select_mmgbsa_jobs(h, _Args())
     assert len(jobs) == 1
     assert jobs[0][0].probe_resid == 280, "the molecule with more bound frames wins"
-    assert len(jobs[0][1]) == 5
+    assert sum(len(f) for _, f in jobs[0][1]) == 5
 
 
 def test_more_molecules_can_be_requested():
@@ -50,19 +50,26 @@ def test_more_molecules_can_be_requested():
         mmgbsa_n_molecules = 2
 
     h = _hotspot(_occ("r0", 279, range(10)), _occ("r0", 280, range(40, 100)))
-    assert len(select_mmgbsa_jobs(h, Args())) == 2
+    jobs = select_mmgbsa_jobs(h, Args())
+    assert len(jobs) == 2
+    assert [j[0].probe_resid for j in jobs] == [280, 279], "best-occupied first"
 
 
 def test_frames_of_one_molecule_pool_across_replicas():
-    """Same molecule, two replicas sharing a topology — both contribute frames."""
+    """Same molecule, two replicas sharing a topology — both contribute frames, but
+    frame indices are trajectory-local, so each chosen frame must stay paired with the
+    record (and trajectory) it actually came from."""
     h = _hotspot(_occ("r0", 279, range(10)), _occ("r1", 279, range(20, 30)))
     jobs = select_mmgbsa_jobs(h, _Args())
 
     assert len(jobs) == 1, "one molecule means one job, not one per replica"
-    merged, frames = jobs[0]
-    assert merged.frames == list(range(10)) + list(range(20, 30))
-    assert len(frames) == 5
-    assert set(frames) <= set(merged.frames)
+    representative, selections = jobs[0]
+    assert {o.source_label for o, _ in selections} == {"r0", "r1"}
+    assert sum(len(f) for _, f in selections) == 5
+    for occ, frames in selections:
+        assert set(frames) <= set(occ.frames), (
+            "a chosen frame must be present in the record it is paired with"
+        )
 
 
 def test_source_filter_restricts_selection():
@@ -71,6 +78,7 @@ def test_source_filter_restricts_selection():
 
     h = _hotspot(_occ("r0", 279, range(10)), _occ("r1", 280, range(20, 30)))
     jobs = select_mmgbsa_jobs(h, Args())
+    assert len(jobs) >= 1
     assert all(o.source_label == "r1" for o, _ in jobs)
 
 
@@ -94,6 +102,7 @@ def test_script_validates_the_pocket_selection_after_preparation():
     script = render_autopath_script(manifest, mmgbsa=None, mode="smd")
     assert "EXPECTED_POCKET_RESNAMES" in script
     assert "raise SystemExit" in script
+    assert "check_pocket(POSE_PDB)" in script, "the check must actually be invoked"
 
 
 def test_mmgbsa_only_script_does_not_build_a_system():

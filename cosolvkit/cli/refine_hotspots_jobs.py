@@ -10,11 +10,11 @@ import logging
 import os
 import subprocess
 
-from cosolvkit.analysis.core.models import ProbeOccupancy
+import numpy as np
+
 from cosolvkit.analysis.sites.mmgbsa import (
     amber_exclude_mask,
     check_single_topology,
-    select_frames,
     write_frame_trajectory,
 )
 from cosolvkit.analysis.sites.poses import write_pose
@@ -36,11 +36,15 @@ def target_tag(target, is_binding_site):
 
 
 def select_mmgbsa_jobs(hotspot, args):
-    """Pick (molecule, frames) pairs for MMGBSA, best-occupied molecule first.
+    """Pick (representative, selections) pairs for MMGBSA, best-occupied molecule first.
 
     A job is keyed by molecule because MMPBSA takes a single ligand mask: at a frame
     where a different copy occupied the blob, this molecule is elsewhere in the box.
-    Records for the same molecule across replicas pool, since replicas share a topology.
+    Records for the same molecule across replicas pool, since replicas share a topology
+    — but frame indices are TRAJECTORY-LOCAL, so a pooled frame must stay attached to
+    the record (and therefore the trajectory file) it came from. ``selections`` is
+    ``[(ProbeOccupancy, [frame, ...]), ...]``, one entry per source record that
+    contributed a chosen frame, ready to hand straight to :func:`write_frame_trajectory`.
     """
     records = list(hotspot.probe_occupancy)
     if args.mmgbsa_source is not None:
@@ -60,21 +64,21 @@ def select_mmgbsa_jobs(hotspot, args):
     jobs = []
     for (_resname, _resid), occs in ranked[:args.mmgbsa_n_molecules]:
         check_single_topology(occs)
-        primary = max(occs, key=lambda o: (o.n_frames_bound, o.source_label))
-        pooled = sorted({f for o in occs for f in o.frames})
-        merged = ProbeOccupancy(
-            source_label=primary.source_label,
-            topology=primary.topology,
-            trajectory=primary.trajectory,
-            probe_resname=primary.probe_resname,
-            probe_resid=primary.probe_resid,
-            probe_resindex=primary.probe_resindex,
-            frames=pooled,
-            n_frames_scanned=sum(o.n_frames_scanned for o in occs),
-            stride=primary.stride,
-        )
-        frames = select_frames(merged, args.mmgbsa_n_frames, seed=args.seed)
-        jobs.append((merged, frames))
+        representative = max(occs, key=lambda o: (o.n_frames_bound, o.source_label))
+
+        # Frame indices are trajectory-local, so every candidate frame must stay
+        # attached to the record it came from.
+        candidates = [(i, f) for i, occ in enumerate(occs) for f in occ.frames]
+        n = min(args.mmgbsa_n_frames, len(candidates))
+        rng = np.random.default_rng(args.seed)
+        picked = sorted(rng.choice(len(candidates), size=n, replace=False).tolist())
+
+        by_record = {}
+        for c in picked:
+            i, f = candidates[c]
+            by_record.setdefault(i, []).append(int(f))
+        selections = [(occs[i], sorted(fs)) for i, fs in sorted(by_record.items())]
+        jobs.append((representative, selections))
     return jobs
 
 
@@ -97,10 +101,13 @@ def render_autopath_script(manifest, mmgbsa, mode):
         f"EXPECTED_POCKET_RESNAMES = {list(manifest['pocket_resnames'])!r}",
         "",
         "",
-        "def check_pocket(prepared_pdb):",
-        '    """AutoPath\'s do_fix_pdb can renumber; a shifted selection would restrain',
-        '    the wrong residues, so fail instead of running the wrong simulation."""',
-        "    residues = mda.Universe(prepared_pdb).residues",
+        "def check_pocket(pose_pdb):",
+        '    """Verify POCKET_SELECTION still indexes the residues named in',
+        "    EXPECTED_POCKET_RESNAMES in the pose file about to be handed to AutoPath.",
+        '    Catches a stale or mismatched manifest before a simulation restrains the',
+        '    wrong residues; it does not check AutoPath\'s post-preparation renumbering,',
+        '    since the prepared system path is not known here."""',
+        "    residues = mda.Universe(pose_pdb).residues",
         "    got = [residues[i - 1].resname for i in POCKET_SELECTION]",
         "    if got != EXPECTED_POCKET_RESNAMES:",
         "        raise SystemExit(",
@@ -114,6 +121,8 @@ def render_autopath_script(manifest, mmgbsa, mode):
     if mode in ("smd", "both"):
         lines += [
             "from autopath.autopath_core import AutoPath",
+            "",
+            "check_pocket(POSE_PDB)",
             "",
             "ap = AutoPath(",
             "    pdb_path=POSE_PDB,",
@@ -224,10 +233,10 @@ def _build_mmgbsa_inputs(target, tag, tag_dir, args):
                        tag)
         return None
 
-    occ, frames = jobs[0]
+    occ, selections = jobs[0]
     mm_dir = os.path.join(tag_dir, "mmgbsa")
     os.makedirs(mm_dir, exist_ok=True)
-    write_frame_trajectory([(occ, frames)], os.path.join(mm_dir, "frames.dcd"))
+    write_frame_trajectory(selections, os.path.join(mm_dir, "frames.dcd"))
 
     import MDAnalysis as mda
     u = mda.Universe(occ.topology)
