@@ -15,13 +15,42 @@ import numpy as np
 from cosolvkit.analysis.sites.mmgbsa import (
     amber_exclude_mask,
     check_single_topology,
+    select_frames,
     write_frame_trajectory,
 )
 from cosolvkit.analysis.sites.poses import write_pose
 
 logger = logging.getLogger(__name__)
 
-SOLVENT_STRIP = ":HOH:WAT:Na+:Cl-"
+# AutoPath's own default (``ap_PLIP.prepare_mmgbsa_batch``). Amber names the monatomic
+# ions NA and CL, not "Na+"/"Cl-": the ``+``/``-`` forms match nothing in a real prmtop
+# and leave every counter-ion sitting in the MMGBSA receptor.
+SOLVENT_STRIP = ":POP:HOH:WAT:NA:CL:K:MG"
+
+# Minimal MMPBSA input. ``prepare_mmgbsa_batch`` rewrites the commented-out frame lines
+# in place (it matches on the leading '#startframe'/'#endframe'/'#interval'), so those
+# must stay exactly as written here; ``strip_mask`` is likewise matched by prefix when
+# persistent waters are requested.
+MMPBSA_IN_TEMPLATE = """\
+&general
+use_sander=1,
+
+#startframe = 1,
+#endframe = 1,
+#interval = 1,
+
+# Keep temporary files off; flip to 1 to debug a failed run.
+keep_files=0,
+debug_printlevel=2,
+netcdf=1,
+
+strip_mask= "{strip_mask}"
+/
+&gb
+igb=8,
+saltcon=0.15,
+/
+"""
 
 
 def target_tag(target, is_binding_site):
@@ -61,25 +90,47 @@ def select_mmgbsa_jobs(hotspot, args):
         key=lambda kv: (-sum(o.n_frames_bound for o in kv[1]), kv[0][1]),
     )
 
+    strategy = getattr(args, "mmgbsa_frame_strategy", "random")
+
     jobs = []
     for (_resname, _resid), occs in ranked[:args.mmgbsa_n_molecules]:
         check_single_topology(occs)
         representative = max(occs, key=lambda o: (o.n_frames_bound, o.source_label))
-
-        # Frame indices are trajectory-local, so every candidate frame must stay
-        # attached to the record it came from.
-        candidates = [(i, f) for i, occ in enumerate(occs) for f in occ.frames]
-        n = min(args.mmgbsa_n_frames, len(candidates))
-        rng = np.random.default_rng(args.seed)
-        picked = sorted(rng.choice(len(candidates), size=n, replace=False).tolist())
-
-        by_record = {}
-        for c in picked:
-            i, f = candidates[c]
-            by_record.setdefault(i, []).append(int(f))
-        selections = [(occs[i], sorted(fs)) for i, fs in sorted(by_record.items())]
-        jobs.append((representative, selections))
+        selections = _select_selections(occs, args, strategy)
+        if selections:
+            jobs.append((representative, selections))
     return jobs
+
+
+def _select_selections(occs, args, strategy):
+    """Split the frame budget across records, then let ``select_frames`` do the choosing.
+
+    Frame indices are trajectory-local, so the budget is allocated per record and the
+    frames themselves come from :func:`cosolvkit.analysis.sites.mmgbsa.select_frames`,
+    which owns the selection strategy (including the reserved ``"cluster"`` hook) and
+    the shortfall logging. Allocation draws slots from the pooled candidate list without
+    replacement, so a record contributes in proportion to how long it was bound — the
+    same distribution the pooled draw gave — but nothing is ever merged across records.
+    """
+    counts = [len(occ.frames) for occ in occs]
+    total = sum(counts)
+    n = min(args.mmgbsa_n_frames, total)
+    if n <= 0:
+        return []
+
+    owners = np.repeat(np.arange(len(occs)), counts)
+    rng = np.random.default_rng(args.seed)
+    picked = rng.choice(owners, size=n, replace=False)
+    per_record = np.bincount(picked, minlength=len(occs))
+
+    selections = []
+    for i, occ in enumerate(occs):
+        k = int(per_record[i])
+        if k == 0:
+            continue
+        selections.append((occ, select_frames(occ, k, seed=args.seed,
+                                              strategy=strategy)))
+    return selections
 
 
 def render_autopath_script(manifest, mmgbsa, mode):
@@ -136,31 +187,62 @@ def render_autopath_script(manifest, mmgbsa, mode):
             "",
         ]
 
-    if mode in ("mmgbsa", "both") and mmgbsa is not None:
+    specs = [] if mmgbsa is None else (
+        [mmgbsa] if isinstance(mmgbsa, dict) else list(mmgbsa))
+
+    if mode in ("mmgbsa", "both") and specs:
         lines += [
             "from autopath.ap_PLIP import ProteinLigandAnalyzer",
             "",
-            "ProteinLigandAnalyzer.prepare_mmgbsa_batch(",
-            f"    sysname={mmgbsa['sysname']!r},",
-            f"    prmtop={mmgbsa['prmtop']!r},",
-            f"    traj_fname={mmgbsa['trajectory']!r},",
-            f"    ligand_amber_selection={mmgbsa['ligand_amber_selection']!r},",
-            f"    strip_amber_selection={mmgbsa['strip_amber_selection']!r},",
-            "    traj_slice=None,",
-            f"    output_folder={mmgbsa['output_folder']!r},",
-            "    radii='mbondi3',",
-            ")",
+            "# NOTE: prepare_mmgbsa_batch only PREPARES the calculation. It writes one",
+            "# qfiles_mmgbsa/<sysname>_mmgbsa.q per ligand plus a master",
+            "# run_mmgbsa_batch.sh, both relative to this script's working directory,",
+            "# and returns without computing anything. Nothing runs until someone",
+            "# submits that second stage by hand:",
+            "#     cd <this directory> && ./run_mmgbsa_batch.sh",
+            "# The SLURM job you are reading now finishes as soon as the inputs exist.",
             "",
         ]
+        for spec in specs:
+            lines += [
+                "ProteinLigandAnalyzer.prepare_mmgbsa_batch(",
+                f"    sysname={spec['sysname']!r},",
+                f"    prmtop={spec['prmtop']!r},",
+                f"    traj_fname={spec['trajectory']!r},",
+                f"    ligand_amber_selection={spec['ligand_amber_selection']!r},",
+                f"    strip_amber_selection={spec['strip_amber_selection']!r},",
+                "    traj_slice=None,",
+                f"    mmpbsa_in={spec['mmpbsa_in']!r},",
+                f"    output_folder={spec['output_folder']!r},",
+                "    radii='mbondi3',",
+                ")",
+                "",
+            ]
 
     return "\n".join(lines)
 
 
-def _slurm_script(tag, script_path, template_path=None):
+def _slurm_script(tag, script_path, template_path=None, workdir=None, mode="both"):
+    """Render the qfile that runs one target's driver.
+
+    The ``cd`` is not cosmetic. AutoPath derives its system name from the PDB basename
+    and creates ``<basename>/`` RELATIVE TO THE WORKING DIRECTORY, and
+    ``prepare_mmgbsa_batch`` likewise writes ``qfiles_mmgbsa/`` and
+    ``run_mmgbsa_batch.sh`` relative to it. Every target's pose is called ``pose.pdb``,
+    so without the ``cd`` all N jobs would resolve to the same ``./pose_fixed/`` under
+    the submit directory and clobber each other's ``system.pdb``, ``equilibration/``
+    and ``sMD/``.
+    """
+    workdir = os.path.abspath(workdir) if workdir else os.path.dirname(
+        os.path.abspath(script_path))
     if template_path:
         with open(template_path) as fh:
-            return fh.read().replace("{{SCRIPT}}", script_path).replace("{{NAME}}", tag)
-    return "\n".join([
+            return (fh.read()
+                    .replace("{{SCRIPT}}", script_path)
+                    .replace("{{NAME}}", tag)
+                    .replace("{{WORKDIR}}", workdir))
+
+    lines = [
         "#!/bin/bash",
         f"#SBATCH --job-name={tag}",
         f"#SBATCH --output={tag}_%j.out",
@@ -168,10 +250,31 @@ def _slurm_script(tag, script_path, template_path=None):
         "#SBATCH --ntasks=1",
         "#SBATCH --cpus-per-task=8",
         "#SBATCH --time=24:00:00",
+    ]
+    if mode in ("smd", "both"):
+        lines += [
+            "#SBATCH --gres=gpu:1",
+            "",
+            "# The smd leg runs GPU MD (equilibration + steered pulling), so a GPU is",
+            "# requested here. A --mode mmgbsa job only writes MMPBSA inputs and needs",
+            "# no GPU at all.",
+        ]
+    else:
+        lines += [
+            "",
+            "# No --gres: the mmgbsa leg only PREPARES MMPBSA inputs on the CPU. The",
+            "# GPU is needed by the smd leg, which this job does not run.",
+        ]
+    lines += [
+        "",
+        "# AutoPath and prepare_mmgbsa_batch both write relative to the working",
+        "# directory; without this cd every target would collide in the submit dir.",
+        f"cd {workdir} || exit 1",
         "",
         f"python {script_path}",
         "",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def generate_jobs(config, results, out_dir, args):
@@ -196,17 +299,18 @@ def generate_jobs(config, results, out_dir, args):
 
         manifest = write_pose(pose_ref, os.path.join(tag_dir, "pose.pdb"))
 
-        mmgbsa_spec = None
+        mmgbsa_specs = None
         if args.mode in ("mmgbsa", "both"):
-            mmgbsa_spec = _build_mmgbsa_inputs(target, tag, tag_dir, args)
+            mmgbsa_specs = _build_mmgbsa_inputs(config, target, tag, tag_dir, args)
 
         script_path = os.path.join(tag_dir, "run_autopath.py")
         with open(script_path, "w") as fh:
-            fh.write(render_autopath_script(manifest, mmgbsa_spec, args.mode))
+            fh.write(render_autopath_script(manifest, mmgbsa_specs, args.mode))
 
         qfile = os.path.join(tag_dir, "job.slurm")
         with open(qfile, "w") as fh:
-            fh.write(_slurm_script(tag, script_path, args.slurm_template))
+            fh.write(_slurm_script(tag, script_path, args.slurm_template,
+                                   workdir=tag_dir, mode=args.mode))
         qfiles.append(qfile)
 
     master = os.path.join(out_dir, "submit_all.sh")
@@ -225,33 +329,96 @@ def generate_jobs(config, results, out_dir, args):
     return qfiles
 
 
-def _build_mmgbsa_inputs(target, tag, tag_dir, args):
-    """Extract the frame trajectory and describe the prepare_mmgbsa_batch call."""
+def cosolvent_species_for(config, source_label, fallback):
+    """Every cosolvent resname present in the simulation labelled *source_label*.
+
+    A ``SimulationEntry`` may list several cosolvents. Only the analysed species was
+    ever masked out, so any second species stayed in the MMGBSA receptor and its
+    interaction energy was folded into the result.
+    """
+    for sim in getattr(config, "simulations", []) or []:
+        if sim.label == source_label:
+            species = [c for c in sim.cosolvents]
+            if fallback not in species:
+                species.append(fallback)
+            return species
+    logger.warning(
+        "No simulation labelled '%s' in the config; stripping only %s from the MMGBSA "
+        "receptor. Any other cosolvent species in that run will remain in it.",
+        source_label, fallback,
+    )
+    return [fallback]
+
+
+def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
+    """Extract frame trajectories and describe one prepare_mmgbsa_batch call per molecule.
+
+    One MMGBSA job covers exactly one probe molecule, because MMPBSA takes a single
+    ligand mask. Each molecule therefore gets its own subdirectory so their frame
+    trajectories, MMPBSA inputs and results never overwrite one another.
+    """
     jobs = select_mmgbsa_jobs(target, args)
     if not jobs:
         logger.warning("Target %s has no MMGBSA-eligible molecule; skipping that leg.",
                        tag)
         return None
 
-    occ, selections = jobs[0]
-    mm_dir = os.path.join(tag_dir, "mmgbsa")
-    os.makedirs(mm_dir, exist_ok=True)
-    write_frame_trajectory(selections, os.path.join(mm_dir, "frames.dcd"))
-
     import MDAnalysis as mda
-    u = mda.Universe(occ.topology)
-    all_resids = set(int(r) for r in
-                     u.select_atoms(f"resname {occ.probe_resname}").resids)
-    others = amber_exclude_mask(all_resids, keep=occ.probe_resid)
 
-    return {
-        "sysname": f"{tag}_{occ.probe_resname}{occ.probe_resid}_{occ.source_label}",
-        "prmtop": occ.topology,
-        "trajectory": os.path.join(mm_dir, "frames.dcd"),
-        "ligand_amber_selection": occ.amber_mask,
-        "strip_amber_selection": SOLVENT_STRIP + others,
-        "output_folder": mm_dir,
-    }
+    mm_root = os.path.join(tag_dir, "mmgbsa")
+    specs = []
+    for occ, selections in jobs:
+        sysname = f"{tag}_{occ.probe_resname}{occ.probe_resid}_{occ.source_label}"
+        mm_dir = os.path.join(mm_root, f"{occ.probe_resname}{occ.probe_resid}")
+        os.makedirs(mm_dir, exist_ok=True)
+        traj = os.path.join(mm_dir, "frames.dcd")
+        write_frame_trajectory(selections, traj)
+
+        u = mda.Universe(occ.topology)
+        species = cosolvent_species_for(config, occ.source_label, occ.probe_resname)
+        all_resids = set()
+        for resname in species:
+            all_resids.update(
+                int(r) for r in u.select_atoms(f"resname {resname}").resids)
+        others = amber_exclude_mask(all_resids, keep=occ.probe_resid)
+        strip = SOLVENT_STRIP + others
+
+        mmpbsa_in = os.path.join(mm_dir, "mmgbsa.in")
+        with open(mmpbsa_in, "w") as fh:
+            fh.write(MMPBSA_IN_TEMPLATE.format(strip_mask=strip))
+
+        specs.append({
+            "sysname": sysname,
+            "prmtop": occ.topology,
+            "trajectory": traj,
+            "ligand_amber_selection": occ.amber_mask,
+            "strip_amber_selection": strip,
+            "mmpbsa_in": mmpbsa_in,
+            "output_folder": mm_dir,
+        })
+    return specs
+
+
+def _load_field_maps(checkpoint_dir, cosolvents):
+    """``{cosolvent: (array, origin, delta)}`` from the merged AGFE maps in *checkpoint_dir*.
+
+    Mirrors ``MultiSimulationReport._load_merged_field_maps``: binding-site scoring fuses
+    site features over the maps when it has them and falls back to a member-count-biased
+    best-of-members maximum when it does not, so omitting them here would let
+    refine_hotspots rank a different top-N than ``binding_sites.csv`` reports.
+    """
+    import numpy as _np
+    from gridData import Grid
+
+    maps = {}
+    for cos in cosolvents:
+        path = os.path.join(checkpoint_dir, f"map_agfe_{cos}.dx")
+        if not os.path.isfile(path):
+            continue
+        g = Grid(path)
+        maps[cos] = (_np.asarray(g.grid), _np.asarray(g.origin, dtype=float),
+                     _np.asarray(g.delta, dtype=float))
+    return maps
 
 
 def _rank_targets(config, results, args):
@@ -263,6 +430,18 @@ def _rank_targets(config, results, args):
 
     from cosolvkit.analysis.sites.binding_sites import identify_binding_sites
 
+    checkpoint_dir = (getattr(args, "checkpoint", None)
+                      or os.path.join(config.out_path, "merged"))
+    field_maps = _load_field_maps(checkpoint_dir, list(results))
+    missing = [c for c in results if c not in field_maps]
+    if missing:
+        logger.warning(
+            "No merged map_agfe_*.dx in %s for %s; binding-site scoring falls back to a "
+            "best-of-members maximum that is biased by member count, so the targets "
+            "chosen here may differ from the ranking in binding_sites.csv.",
+            checkpoint_dir, ", ".join(sorted(missing)),
+        )
+
     bs_cfg = config.binding_sites
     sites = identify_binding_sites(
         results,
@@ -270,5 +449,6 @@ def _rank_targets(config, results, args):
         weights=bs_cfg.weights,
         merge_tolerance_ang=bs_cfg.merge_tolerance_ang,
         probe_chemotype_overrides=bs_cfg.probe_chemotypes,
+        field_maps=field_maps,
     )
     return [(s, True) for s in sites[:args.top_n]]
