@@ -48,12 +48,17 @@ def write_pose(pose_ref, out_pdb, protein_selection="protein", pocket_cutoff=5.0
     u.trajectory[pose_ref.frame]
 
     protein = u.select_atoms(protein_selection)
-    probe = u.select_atoms(f"resid {pose_ref.probe_resid} and "
-                           f"resname {pose_ref.probe_resname}")
+    probe = u.select_atoms(f"resindex {pose_ref.probe_resindex}")
     if len(probe) == 0:
         raise ValueError(
             f"No atoms for {pose_ref.probe_resname} resid {pose_ref.probe_resid} in "
             f"{pose_ref.topology}."
+        )
+    found = set(probe.resnames)
+    if found != {pose_ref.probe_resname}:
+        raise ValueError(
+            f"resindex {pose_ref.probe_resindex} holds resname(s) {sorted(found)}, "
+            f"not {pose_ref.probe_resname!r} as the PoseRef claims — wrong topology?"
         )
 
     # Bring the probe to its nearest image of the protein so the written complex is

@@ -90,6 +90,44 @@ def test_pocket_selection_indexes_the_written_file_not_the_source(tmp_path):
         assert written.residues[i - 1].resname == name
 
 
+def _universe_duplicate_resid_same_resname():
+    """4 protein atoms, two 2-atom FMD molecules that both carry resid 279.
+
+    Only ``resindex`` distinguishes them: this must not silently pull in both.
+    """
+    atom_resindex = [0, 0, 0, 0, 1, 1, 2, 2]
+    u = mda.Universe.empty(8, n_residues=3, n_segments=1,
+                           atom_resindex=atom_resindex, residue_segindex=[0, 0, 0],
+                           trajectory=True)
+    u.add_TopologyAttr("name", ["CA", "CB", "CG", "CD", "C1", "N1", "C1", "N1"])
+    u.add_TopologyAttr("type", ["C", "C", "C", "C", "C", "N", "C", "N"])
+    u.add_TopologyAttr("resname", ["ALA", "FMD", "FMD"])
+    u.add_TopologyAttr("resid", [1, 279, 279])
+    u.add_TopologyAttr("segid", ["A"])
+    coords = np.zeros((2, 8, 3), dtype=np.float32)
+    coords[:, :4] = np.array([[1.0, 1.0, 1.0], [2.0, 1.0, 1.0],
+                              [1.0, 2.0, 1.0], [1.0, 1.0, 2.0]])
+    coords[:, 4:6] = np.array([[3.0, 1.0, 1.0], [3.5, 1.0, 1.0]])
+    coords[:, 6:8] = np.array([[30.0, 30.0, 30.0], [30.5, 30.0, 30.0]])
+    u.load_new(coords, order="fac", format=MemoryReader,
+               dimensions=np.tile(np.array([40.0] * 3 + [90.0] * 3), (2, 1)))
+    return u
+
+
+def test_duplicate_resid_does_not_pull_in_a_second_probe(tmp_path):
+    """resindex, not resid, must select the probe: a repeated resid is not ambiguous."""
+    from cosolvkit.analysis.sites.poses import write_pose
+
+    out = tmp_path / "pose.pdb"
+    u = _universe_duplicate_resid_same_resname()
+    write_pose(_pose_ref(), str(out), open_universe=lambda t, x: u)
+
+    written = mda.Universe(str(out))
+    probes = written.select_atoms("resname FMD")
+    assert len(probes) == 2, "exactly one 2-atom probe molecule, not both"
+    assert len(np.unique(probes.resids)) == 1
+
+
 def test_manifest_is_written_beside_the_pose(tmp_path):
     from cosolvkit.analysis.sites.poses import write_pose
 
