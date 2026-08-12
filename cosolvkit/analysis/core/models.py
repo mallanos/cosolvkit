@@ -10,7 +10,7 @@
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _round_or_none(value, ndigits=4):
@@ -25,6 +25,94 @@ def _round_or_none(value, ndigits=4):
     except (TypeError, ValueError):
         return None
     return round(fval, ndigits) if np.isfinite(fval) else None
+
+
+@dataclass
+class ProbeOccupancy:
+    """Frames in which one probe molecule occupied one hotspot, in one source file.
+
+    Identity is ``(source_label, probe_resname, probe_resid)``. A hotspot visited by
+    several copies of a probe holds one record per copy.
+    """
+
+    source_label:     str
+    topology:         str
+    trajectory:       str
+    probe_resname:    str
+    probe_resid:      int
+    probe_resindex:   int
+    frames:           List[int]
+    n_frames_scanned: int
+    stride:           int = 1
+
+    @property
+    def n_frames_bound(self) -> int:
+        return len(self.frames)
+
+    @property
+    def occupancy_fraction(self) -> float:
+        return (self.n_frames_bound / self.n_frames_scanned
+                if self.n_frames_scanned else 0.0)
+
+    @property
+    def amber_mask(self) -> str:
+        """Amber residue mask selecting this molecule, e.g. ``":279"``."""
+        return f":{self.probe_resid}"
+
+    def episodes(self, gap_tolerance: int = 0) -> List[Tuple[int, int]]:
+        """Inclusive frame bounds of contiguous residence.
+
+        Two sampled frames are contiguous when they differ by at most
+        ``stride * (1 + gap_tolerance)``. Derived from ``frames`` on every call — never
+        stored, because storing it would duplicate state.
+        """
+        if not self.frames:
+            return []
+        max_gap = self.stride * (1 + gap_tolerance)
+        ordered = sorted(self.frames)
+        out = []
+        start = prev = ordered[0]
+        for f in ordered[1:]:
+            if f - prev > max_gap:
+                out.append((start, prev))
+                start = f
+            prev = f
+        out.append((start, prev))
+        return out
+
+    def longest_episode(self, gap_tolerance: int = 0) -> Optional[Tuple[int, int]]:
+        """Widest episode; ties resolve to the earliest."""
+        eps = self.episodes(gap_tolerance)
+        if not eps:
+            return None
+        return max(eps, key=lambda e: (e[1] - e[0], -e[0]))
+
+    def to_dict(self) -> dict:
+        return {
+            "source_label": self.source_label,
+            "topology": self.topology,
+            "trajectory": self.trajectory,
+            "probe_resname": self.probe_resname,
+            "probe_resid": int(self.probe_resid),
+            "probe_resindex": int(self.probe_resindex),
+            "frames": [int(f) for f in self.frames],
+            "n_frames_scanned": int(self.n_frames_scanned),
+            "stride": int(self.stride),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ProbeOccupancy":
+        return cls(
+            source_label=str(d["source_label"]),
+            topology=str(d["topology"]),
+            trajectory=str(d["trajectory"]),
+            probe_resname=str(d["probe_resname"]),
+            probe_resid=int(d["probe_resid"]),
+            probe_resindex=int(d["probe_resindex"]),
+            frames=[int(f) for f in d["frames"]],
+            n_frames_scanned=int(d["n_frames_scanned"]),
+            stride=int(d.get("stride", 1)),
+        )
 
 
 # ---------------------------------------------------------------------------
