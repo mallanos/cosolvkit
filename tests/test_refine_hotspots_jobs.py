@@ -139,7 +139,7 @@ def test_mmgbsa_only_script_does_not_build_a_system():
               "ligand_amber_selection": ":279",
               "strip_amber_selection": ":POP:HOH:WAT:NA:CL:K:MG:280-315",
               "mmpbsa_in": "/tmp/bs_12/mmgbsa/mmgbsa.in",
-              "output_folder": "/tmp/bs_12/mmgbsa"}
+              "output_folder": "/tmp/bs_12/mmgbsa", "radii": "mbondi2"}
     script = render_autopath_script(manifest, mmgbsa=mmgbsa, mode="mmgbsa")
     assert "prepare_mmgbsa_batch" in script
     assert "AutoPath(" not in script
@@ -154,7 +154,7 @@ def test_script_passes_an_mmpbsa_input_file():
     mmgbsa = {"sysname": "s", "prmtop": "/tmp/a.prmtop", "trajectory": "/tmp/f.dcd",
               "ligand_amber_selection": ":279", "strip_amber_selection": ":NA:CL",
               "mmpbsa_in": "/tmp/bs_12/mmgbsa/mmgbsa.in",
-              "output_folder": "/tmp/bs_12/mmgbsa"}
+              "output_folder": "/tmp/bs_12/mmgbsa", "radii": "mbondi2"}
     script = render_autopath_script(manifest, mmgbsa=mmgbsa, mode="mmgbsa")
     assert "mmpbsa_in='/tmp/bs_12/mmgbsa/mmgbsa.in'" in script
 
@@ -164,7 +164,7 @@ def test_script_documents_the_two_stage_mmgbsa_handoff():
                 "pocket_selection": [4], "pocket_resnames": ["TYR"]}
     mmgbsa = {"sysname": "s", "prmtop": "/tmp/a.prmtop", "trajectory": "/tmp/f.dcd",
               "ligand_amber_selection": ":279", "strip_amber_selection": ":NA:CL",
-              "mmpbsa_in": "/tmp/m/mmgbsa.in", "output_folder": "/tmp/m"}
+              "mmpbsa_in": "/tmp/m/mmgbsa.in", "output_folder": "/tmp/m", "radii": "mbondi2"}
     script = render_autopath_script(manifest, mmgbsa=mmgbsa, mode="mmgbsa")
     assert "run_mmgbsa_batch.sh" in script, (
         "the driver must say that a second submission stage is required"
@@ -177,10 +177,10 @@ def test_script_renders_one_call_per_molecule():
     specs = [
         {"sysname": "a", "prmtop": "/t/a.prmtop", "trajectory": "/t/a/frames.dcd",
          "ligand_amber_selection": ":279", "strip_amber_selection": ":NA",
-         "mmpbsa_in": "/t/a/mmgbsa.in", "output_folder": "/t/a"},
+         "mmpbsa_in": "/t/a/mmgbsa.in", "output_folder": "/t/a", "radii": "mbondi2"},
         {"sysname": "b", "prmtop": "/t/a.prmtop", "trajectory": "/t/b/frames.dcd",
          "ligand_amber_selection": ":280", "strip_amber_selection": ":NA",
-         "mmpbsa_in": "/t/b/mmgbsa.in", "output_folder": "/t/b"},
+         "mmpbsa_in": "/t/b/mmgbsa.in", "output_folder": "/t/b", "radii": "mbondi2"},
     ]
     script = render_autopath_script(manifest, mmgbsa=specs, mode="mmgbsa")
     assert script.count("prepare_mmgbsa_batch(") == 2, (

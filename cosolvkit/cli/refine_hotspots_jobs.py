@@ -59,10 +59,41 @@ netcdf=1,
 strip_mask= "{strip_mask}"
 /
 &gb
-igb=8,
-saltcon=0.15,
+igb={igb},
+saltcon={saltcon},
 /
 {decomp}"""
+
+# The GB model dictates the radius set; a mismatched pair silently changes the
+# energies rather than erroring, so the pairing is encoded here instead of being
+# two independent defaults that can drift apart.
+IGB_RADII = {
+    1: "mbondi",
+    2: "mbondi2",
+    5: "mbondi2",
+    7: "bondi",
+    8: "mbondi3",
+}
+DEFAULT_IGB = 5
+DEFAULT_SALTCON = 0.15
+
+
+def radii_for_igb(igb, override=None):
+    """Radius set matching *igb*, or *override* with a warning when it does not match."""
+    canonical = IGB_RADII.get(int(igb))
+    if override is None:
+        if canonical is None:
+            raise ValueError(
+                f"No canonical radius set known for igb={igb}; pass --radii explicitly."
+            )
+        return canonical
+    if canonical is not None and override != canonical:
+        logger.warning(
+            "radii=%s is not the canonical set for igb=%s (which is %s); "
+            "the energies will not be comparable to runs using the pair.",
+            override, igb, canonical,
+        )
+    return override
 
 # The qfile already passes -do FINAL_DECOMP_mmpbsa.dat, but MMPBSA writes nothing
 # without this section. csv_format=1 is what
@@ -237,7 +268,7 @@ def render_autopath_script(manifest, mmgbsa, mode):
                 "    traj_slice=None,",
                 f"    mmpbsa_in={spec['mmpbsa_in']!r},",
                 f"    output_folder={spec['output_folder']!r},",
-                "    radii='mbondi3',",
+                f"    radii={spec['radii']!r},",
                 ")",
                 "",
             ]
@@ -533,6 +564,8 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
         with open(mmpbsa_in, "w") as fh:
             fh.write(MMPBSA_IN_TEMPLATE.format(
                 strip_mask=strip,
+                igb=int(getattr(args, "igb", DEFAULT_IGB)),
+                saltcon=float(getattr(args, "saltcon", DEFAULT_SALTCON)),
                 decomp=DECOMP_BLOCK if getattr(args, "decomp", True) else ""))
 
         specs.append({
@@ -543,6 +576,8 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
             "strip_amber_selection": strip,
             "mmpbsa_in": mmpbsa_in,
             "output_folder": mm_dir,
+            "radii": radii_for_igb(getattr(args, "igb", DEFAULT_IGB),
+                                   getattr(args, "radii", None)),
         })
     return specs
 

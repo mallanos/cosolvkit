@@ -66,6 +66,15 @@ def build_parser():
                    help="Optional SLURM template file. Placeholders {{NAME}}, {{SCRIPT}}, "
                         "{{WORKDIR}} and {{PYTHON}} are substituted; a template must cd "
                         "to {{WORKDIR}} itself. Omitted, a built-in block is written.")
+    p.add_argument("--igb", type=int, default=5, choices=[1, 2, 5, 7, 8],
+                   help="Generalized Born model for MMGBSA (default: 5).")
+    p.add_argument("--radii", default=None,
+                   help="Amber radius set. Default follows --igb (igb 2/5 -> mbondi2, "
+                        "8 -> mbondi3, 7 -> bondi, 1 -> mbondi); overriding to a "
+                        "non-matching set warns, because it changes the energies "
+                        "without erroring.")
+    p.add_argument("--saltcon", type=float, default=0.15,
+                   help="Salt concentration in M for the GB model (default: 0.15).")
     p.add_argument("--no-decomp", dest="decomp", action="store_false", default=True,
                    help="Skip per-residue MMGBSA decomposition. Decomposition forces "
                         "gbsa=2 (ICOSA), which sander cannot atom-type for transition "

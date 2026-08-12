@@ -91,7 +91,8 @@ def _args(**overrides):
     base = dict(target="hotspots", top_n=5, gap_tolerance=0, mode="both",
                 slurm_template=None, submit=False, checkpoint=None,
                 mmgbsa_n_frames=3, mmgbsa_n_molecules=1, mmgbsa_source=None,
-                mmgbsa_frame_strategy="random", seed=0)
+                mmgbsa_frame_strategy="random", seed=0,
+                igb=5, radii=None, saltcon=0.15)
     base.update(overrides)
     return types.SimpleNamespace(**base)
 
@@ -503,8 +504,9 @@ def test_decomp_block_is_present_only_when_requested():
         DECOMP_BLOCK, MMPBSA_IN_TEMPLATE,
     )
 
-    on = MMPBSA_IN_TEMPLATE.format(strip_mask=":X", decomp=DECOMP_BLOCK)
-    off = MMPBSA_IN_TEMPLATE.format(strip_mask=":X", decomp="")
+    on = MMPBSA_IN_TEMPLATE.format(strip_mask=":X", igb=5, saltcon=0.15,
+                                   decomp=DECOMP_BLOCK)
+    off = MMPBSA_IN_TEMPLATE.format(strip_mask=":X", igb=5, saltcon=0.15, decomp="")
     assert "idecomp=1" in on and "csv_format=1" in on
     assert "&decomp" not in off
 
@@ -552,3 +554,74 @@ def test_close_metal_blocks_a_decomposition_run(tmp_path):
     with pytest.raises(ValueError, match="decomposition"):
         _build_mmgbsa_inputs(_config([sim_metal]), _hotspot(occ), "hs_FMD_12",
                              str(tag_dir), _args())
+
+
+# ---------------------------------------------------------------------------
+# GB model / radius pairing. A mismatched pair changes the energies silently
+# rather than erroring, so the pairing is encoded rather than left to two
+# independent defaults.
+# ---------------------------------------------------------------------------
+
+def test_default_is_igb5_with_mbondi2():
+    from cosolvkit.cli.refine_hotspots import build_parser
+    from cosolvkit.cli.refine_hotspots_jobs import DEFAULT_IGB, radii_for_igb
+
+    args = build_parser().parse_args(["--config", "a.yaml"])
+    assert args.igb == 5
+    assert args.radii is None
+    assert DEFAULT_IGB == 5
+    assert radii_for_igb(args.igb, args.radii) == "mbondi2"
+
+
+def test_every_supported_igb_has_its_canonical_radius_set():
+    from cosolvkit.cli.refine_hotspots_jobs import radii_for_igb
+
+    assert radii_for_igb(1) == "mbondi"
+    assert radii_for_igb(2) == "mbondi2"
+    assert radii_for_igb(5) == "mbondi2"
+    assert radii_for_igb(7) == "bondi"
+    assert radii_for_igb(8) == "mbondi3"
+
+
+def test_mismatched_override_warns_but_is_honoured(caplog):
+    import logging
+
+    from cosolvkit.cli.refine_hotspots_jobs import radii_for_igb
+
+    with caplog.at_level(logging.WARNING):
+        got = radii_for_igb(5, override="mbondi3")
+    assert got == "mbondi3", "an explicit override must still be used"
+    assert any("canonical" in r.message for r in caplog.records)
+
+
+def test_matching_override_is_silent(caplog):
+    import logging
+
+    from cosolvkit.cli.refine_hotspots_jobs import radii_for_igb
+
+    with caplog.at_level(logging.WARNING):
+        assert radii_for_igb(5, override="mbondi2") == "mbondi2"
+    assert not [r for r in caplog.records if "canonical" in r.message]
+
+
+def test_input_and_driver_carry_the_chosen_igb_and_radii(tmp_path):
+    from cosolvkit.cli.refine_hotspots_jobs import (
+        _build_mmgbsa_inputs, render_autopath_script,
+    )
+
+    sim = _system(tmp_path, cosolvents=("FMD",))
+    tag_dir = tmp_path / "hs_FMD_12"
+    tag_dir.mkdir()
+    specs = _build_mmgbsa_inputs(_config([sim]), _hotspot(_occ(sim, 5, 4)),
+                                 "hs_FMD_12", str(tag_dir), _args(igb=5, radii=None))
+
+    text = open(specs[0]["mmpbsa_in"]).read()
+    assert "igb=5," in text
+    assert "igb=8," not in text
+    assert specs[0]["radii"] == "mbondi2"
+
+    manifest = {"pose_pdb": "/x/pose.pdb", "ligand_selection": "resname FMD",
+                "pocket_selection": [1], "pocket_resnames": ["ALA"]}
+    script = render_autopath_script(manifest, specs, "mmgbsa")
+    assert "radii='mbondi2'" in script
+    assert "mbondi3" not in script
