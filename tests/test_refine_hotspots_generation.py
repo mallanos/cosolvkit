@@ -255,7 +255,23 @@ def test_each_molecule_gets_its_own_job_and_directory(tmp_path):
                                  _args(mmgbsa_n_molecules=2))
 
     assert len(specs) == 2
-    assert {s["ligand_amber_selection"] for s in specs} == {":5", ":6"}
+    # Masks are indices into each job's OWN stripped complex, not the original resids.
+    # The two can legitimately coincide: when molecule 5 is the ligand, 6 is stripped,
+    # and vice versa, so each ends up at the same position in its own complex. What
+    # must NOT happen is a raw resid, which ante-MMPBSA would resolve to nothing.
+    import MDAnalysis as mda
+
+    from cosolvkit.cli.refine_hotspots_jobs import (
+        SOLVENT_STRIP, post_strip_ligand_index,
+    )
+    strip_names = {n for n in SOLVENT_STRIP.strip(":").split(":") if n}
+    u = mda.Universe(specs[0]["prmtop"])
+    probe_resids = {int(r) for r in u.select_atoms("resname FMD").resids}
+    for s, resid in zip(sorted(specs, key=lambda x: x["sysname"]), (5, 6)):
+        expected = post_strip_ligand_index(
+            u, strip_resnames=strip_names,
+            excluded_resids=probe_resids - {resid}, keep_resid=resid)
+        assert s["ligand_amber_selection"] == f":{expected}"
     folders = {s["output_folder"] for s in specs}
     assert len(folders) == 2, "one molecule's frames must not overwrite another's"
     trajectories = {s["trajectory"] for s in specs}
@@ -394,3 +410,50 @@ def test_slurm_template_gets_the_python_placeholder(tmp_path):
                            mode="mmgbsa", python_exe="/envs/autopath/bin/python")
     assert "/envs/autopath/bin/python /jobs/bs_1/run_autopath.py" in script
     assert "{{PYTHON}}" not in script
+
+
+# ---------------------------------------------------------------------------
+# ante-MMPBSA ligand numbering — found by a real MMPBSA submission that died in
+# Strip('') because the ligand prmtop came out empty.
+# ---------------------------------------------------------------------------
+
+def _stripping_universe():
+    """protein 1-2, water 3-4, three probes 5-7 (of which 6 is the ligand)."""
+    import MDAnalysis as mda
+
+    resnames = ["ALA", "GLY", "HOH", "HOH", "FMD", "FMD", "FMD"]
+    resids = [1, 2, 3, 4, 5, 6, 7]
+    u = mda.Universe.empty(len(resnames), n_residues=len(resnames), n_segments=1,
+                           atom_resindex=list(range(len(resnames))),
+                           residue_segindex=[0] * len(resnames), trajectory=True)
+    u.add_TopologyAttr("name", ["CA"] * len(resnames))
+    u.add_TopologyAttr("resname", resnames)
+    u.add_TopologyAttr("resid", resids)
+    return u
+
+
+def test_ligand_index_is_renumbered_against_the_stripped_complex():
+    """ante-MMPBSA strips first, then resolves -n against the renumbered complex."""
+    from cosolvkit.cli.refine_hotspots_jobs import post_strip_ligand_index
+
+    # survivors: ALA 1, GLY 2, FMD 6  ->  the ligand is residue 3, NOT 6
+    idx = post_strip_ligand_index(_stripping_universe(), strip_resnames={"HOH"},
+                                  excluded_resids={5, 7}, keep_resid=6)
+    assert idx == 3, "passing the original resid 6 would select nothing after stripping"
+
+
+def test_ligand_index_raises_when_the_ligand_is_itself_stripped():
+    from cosolvkit.cli.refine_hotspots_jobs import post_strip_ligand_index
+
+    with pytest.raises(ValueError, match="does not survive"):
+        post_strip_ligand_index(_stripping_universe(), strip_resnames={"HOH", "FMD"},
+                                excluded_resids=set(), keep_resid=6)
+
+
+def test_ligand_index_counts_only_survivors_before_it():
+    from cosolvkit.cli.refine_hotspots_jobs import post_strip_ligand_index
+
+    # nothing stripped: the index is just the position, which here equals the resid
+    idx = post_strip_ligand_index(_stripping_universe(), strip_resnames=set(),
+                                  excluded_resids=set(), keep_resid=6)
+    assert idx == 6

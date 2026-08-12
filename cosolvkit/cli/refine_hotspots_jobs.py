@@ -361,6 +361,37 @@ def cosolvent_species_for(config, source_label, fallback):
     return [fallback]
 
 
+def post_strip_ligand_index(universe, strip_resnames, excluded_resids, keep_resid):
+    """1-based index of *keep_resid* in the topology AFTER the strip mask is applied.
+
+    ``ante-MMPBSA.py`` applies ``-s`` (strip) FIRST and then resolves ``-n`` (the ligand)
+    against the already-stripped complex, which is renumbered from 1. Passing the probe's
+    ORIGINAL resid selects nothing there: on FosAKP, formamide 289 lives at position 279
+    of the 279-residue stripped complex, so ``-n :289`` produced an EMPTY ligand.prmtop,
+    an untouched receptor.prmtop, and MMPBSA then died in ``Strip('')`` with
+    "Cannot pass no mask to Strip!" because it derives ligand_mask from that prmtop.
+
+    :param universe: MDAnalysis Universe of the solvated topology.
+    :param strip_resnames: residue NAMES removed by the strip mask (solvent, ions).
+    :param excluded_resids: resids of the other probe copies, also removed.
+    :param keep_resid: the ligand's resid in the original topology.
+    :return: its 1-based residue index in the stripped complex.
+    :raises ValueError: if the ligand is itself stripped, which would be silent nonsense.
+    """
+    index = 0
+    for res in universe.residues:
+        resid = int(res.resid)
+        if res.resname in strip_resnames or resid in excluded_resids:
+            continue
+        index += 1
+        if resid == keep_resid:
+            return index
+    raise ValueError(
+        f"resid {keep_resid} does not survive the strip mask, so it cannot be the "
+        f"MMGBSA ligand. Check the strip mask and the probe resname."
+    )
+
+
 def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
     """Extract frame trajectories and describe one prepare_mmgbsa_batch call per molecule.
 
@@ -394,6 +425,19 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
         others = amber_exclude_mask(all_resids, keep=occ.probe_resid)
         strip = SOLVENT_STRIP + others
 
+        # ante-MMPBSA resolves the ligand against the STRIPPED complex, which is
+        # renumbered from 1, so the original resid would select nothing there.
+        ligand_index = post_strip_ligand_index(
+            u,
+            strip_resnames={n for n in SOLVENT_STRIP.strip(":").split(":") if n},
+            excluded_resids=all_resids - {occ.probe_resid},
+            keep_resid=occ.probe_resid,
+        )
+        logger.info(
+            "%s: %s %d is residue %d of the stripped complex (ante-MMPBSA ligand mask).",
+            sysname, occ.probe_resname, occ.probe_resid, ligand_index,
+        )
+
         mmpbsa_in = os.path.join(mm_dir, "mmgbsa.in")
         with open(mmpbsa_in, "w") as fh:
             fh.write(MMPBSA_IN_TEMPLATE.format(strip_mask=strip))
@@ -402,7 +446,7 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
             "sysname": sysname,
             "prmtop": occ.topology,
             "trajectory": traj,
-            "ligand_amber_selection": occ.amber_mask,
+            "ligand_amber_selection": f":{ligand_index}",
             "strip_amber_selection": strip,
             "mmpbsa_in": mmpbsa_in,
             "output_folder": mm_dir,
