@@ -669,8 +669,7 @@ class BindingSite:
                 "accessible_fraction"), 4),
             "n_probe_molecules": self.n_probe_molecules,
             "total_residence_frames": self.total_residence_frames,
-            "best_probe": (self.best_pose().probe_resname
-                           if self.best_pose() is not None else None),
+            "best_probe": pose.probe_resname if pose else None,
         }
         d.update({k: v for k, v in self.properties.items()
                   if not isinstance(v, (list, dict))})
