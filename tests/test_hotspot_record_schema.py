@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from cosolvkit.analysis.core.models import Hotspot, PocketResidue, ProbeOccupancy
+from cosolvkit.analysis.core.models import (Hotspot, MmgbsaResult, PocketResidue,
+                                            ProbeOccupancy)
 
 
 def _loaded_hotspot():
@@ -89,6 +90,48 @@ def test_unknown_schema_raises_rather_than_guessing():
     rec["schema"] = 99
     with pytest.raises(ValueError, match="schema"):
         Hotspot.from_record(rec, h.voxel_mask, h.grid_origin, h.grid_delta)
+
+
+def _mmgbsa_result(delta_total=-3.24, resid=289, source="formamide_r2"):
+    return MmgbsaResult(
+        probe_resname="FMD", probe_resid=resid, source_label=source,
+        delta_total=delta_total, std_dev=1.1, std_err=0.49, n_frames=5,
+        components={"DELTA TOTAL": {"average": delta_total, "std_dev": 1.1,
+                                    "std_err": 0.49}},
+        results_path="/tmp/FINAL_RESULTS_mmpbsa.dat",
+    )
+
+
+def test_to_row_summarizes_mmgbsa_as_best_and_count():
+    h = _loaded_hotspot()
+    h.mmgbsa = [_mmgbsa_result(delta_total=-3.24), _mmgbsa_result(delta_total=-9.0)]
+    row = h.to_row()
+    assert row["mmgbsa_delta_total"] == -9.0
+    assert row["mmgbsa_n_results"] == 2
+
+
+def test_to_row_mmgbsa_summary_is_none_without_results():
+    row = _loaded_hotspot().to_row()
+    assert row["mmgbsa_delta_total"] is None
+    assert row["mmgbsa_n_results"] == 0
+
+
+def test_record_round_trip_preserves_mmgbsa():
+    h = _loaded_hotspot()
+    h.mmgbsa = [_mmgbsa_result()]
+    h.pocket_residues[0].mmgbsa_decomposition = {
+        "van_der_Waals": {"average": -1.2, "std_dev": 0.3, "std_err": 0.1}
+    }
+    h.pocket_residues[0].mmgbsa_location = "R"
+
+    rec = h.to_record()
+    back = Hotspot.from_record(rec, h.voxel_mask, h.grid_origin, h.grid_delta)
+
+    assert len(back.mmgbsa) == 1
+    assert back.mmgbsa[0].probe_resid == 289
+    assert back.mmgbsa[0].delta_total == pytest.approx(-3.24)
+    assert back.pocket_residues[0].mmgbsa_location == "R"
+    assert back.pocket_residues[0].mmgbsa_decomposition["van_der_Waals"]["average"] == -1.2
 
 
 def test_export_writes_no_json_and_a_flat_csv(tmp_path):

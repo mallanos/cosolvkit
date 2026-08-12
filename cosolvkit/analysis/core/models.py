@@ -227,6 +227,16 @@ class PocketResidue:
         Where ``chain`` came from — ``"topology"`` (segid) or ``"chain_reference"``.
     properties : dict
         Extensible bag for arbitrary extra scalar properties.
+    mmgbsa_decomposition : dict
+        Per-residue MMGBSA energy decomposition, keyed by energy group name (e.g.
+        ``"van_der_Waals"``, ``"Electrostatic"``) with ``{"average", "std_dev",
+        "std_err"}`` values in kcal/mol. Populated by
+        :mod:`cosolvkit.analysis.sites.mmgbsa_results`. ``resid`` here is this
+        residue's ORIGINAL topology numbering — the stripped-complex index used by
+        the decomposition table has already been mapped back before assignment.
+    mmgbsa_location : str or None
+        ``'R'`` (receptor) or ``'L'`` (ligand) side of the decomposition table this
+        residue was reported on.
     """
 
     resid:            int
@@ -246,6 +256,8 @@ class PocketResidue:
     )
     chain_source: str = "topology"     # "topology" | "chain_reference"
     properties: Dict[str, Any] = field(default_factory=dict)
+    mmgbsa_decomposition: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    mmgbsa_location: Optional[str] = None
 
     def _iter_sources(self, source=None):
         """Yield the ``{resname: {resid: frames}}`` maps for one source, or all of them."""
@@ -302,6 +314,11 @@ class PocketResidue:
                 for source, by_probe in self.cosolvent_contacts.items()
             },
             "properties": self.properties,
+            "mmgbsa_decomposition": {
+                group: {kk: float(vv) for kk, vv in vals.items()}
+                for group, vals in self.mmgbsa_decomposition.items()
+            },
+            "mmgbsa_location": self.mmgbsa_location,
         }
 
     @classmethod
@@ -332,6 +349,11 @@ class PocketResidue:
             for source, by_probe in raw.items()
         }
         pr.properties = dict(d.get("properties", {}))
+        pr.mmgbsa_decomposition = {
+            group: {kk: float(vv) for kk, vv in vals.items()}
+            for group, vals in (d.get("mmgbsa_decomposition") or {}).items()
+        }
+        pr.mmgbsa_location = d.get("mmgbsa_location")
         return pr
 
     def __repr__(self) -> str:
@@ -372,6 +394,7 @@ class Hotspot:
         self.properties = {}
         self.pocket_residues = []                     # populated on demand
         self.probe_occupancy = []                     # List[ProbeOccupancy]
+        self.mmgbsa = []                               # List[MmgbsaResult]
         # Grid metadata, set by HotspotDetector.detect() after construction; required to
         # combine voxel masks across grids (e.g. binding-site grouping).
         self.grid_origin = None                       # np.ndarray (3,), Angstroms
@@ -451,6 +474,10 @@ class Hotspot:
             "best_probe": pose.probe_resname if pose else None,
             "best_source": pose.source_label if pose else None,
             "best_frame": pose.frame if pose else None,
+            "mmgbsa_delta_total": _round_or_none(
+                min((r.delta_total for r in self.mmgbsa), default=None)
+            ),
+            "mmgbsa_n_results": len(self.mmgbsa),
         }
         d.update({f"agfe_{k}": _round_or_none(v) for k, v in self.per_type_agfe.items()})
         d.update({k: v for k, v in self.properties.items()
@@ -470,6 +497,7 @@ class Hotspot:
         rec["properties"] = self.properties
         rec["pocket_residues"] = [r.to_dict() for r in self.pocket_residues]
         rec["probe_occupancy"] = [o.to_dict() for o in self.probe_occupancy]
+        rec["mmgbsa"] = [m.to_dict() for m in self.mmgbsa]
         return rec
 
     @classmethod
@@ -518,6 +546,7 @@ class Hotspot:
         site.probe_occupancy = [
             ProbeOccupancy.from_dict(o) for o in d.get("probe_occupancy", [])
         ]
+        site.mmgbsa = [MmgbsaResult.from_dict(m) for m in d.get("mmgbsa", [])]
         site.grid_origin = np.asarray(grid_origin, dtype=float)
         site.grid_delta = np.asarray(grid_delta, dtype=float)
         return site
