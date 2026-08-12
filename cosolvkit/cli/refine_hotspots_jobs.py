@@ -395,16 +395,26 @@ def metals_blocking_decomp(universe, ligand_resid, frame=None):
     if frame is not None and getattr(universe, "trajectory", None) is not None:
         universe.trajectory[frame]
     ligand = universe.select_atoms(f"resid {ligand_resid}")
+    if len(ligand) == 0:
+        raise ValueError(
+            f"resid {ligand_resid} selects no atoms, so the metal-to-ligand distance "
+            f"cannot be measured."
+        )
     out = []
     for res in present:
-        try:
-            dist = float(np.linalg.norm(
-                res.atoms.positions[:, None, :] - ligand.positions[None, :, :],
-                axis=-1).min())
-        except (ValueError, IndexError):
-            dist = float("nan")
+        dist = float(np.linalg.norm(
+            res.atoms.positions[:, None, :] - ligand.positions[None, :, :],
+            axis=-1).min())
+        if not np.isfinite(dist):
+            # A topology-only Universe has no real coordinates. Refusing here is the
+            # point: an unmeasurable distance must not slip past the proximity gate.
+            raise ValueError(
+                f"Distance from {res.resname} {res.resid} to resid {ligand_resid} is "
+                f"not finite — the Universe has no coordinates. Load it with a "
+                f"trajectory before checking metal proximity."
+            )
         out.append((res.resname, int(res.resid), dist))
-    return sorted(out, key=lambda t: (np.isnan(t[2]), t[2]))
+    return sorted(out, key=lambda t: t[2])
 
 
 def post_strip_ligand_index(universe, strip_resnames, excluded_resids, keep_resid):
@@ -477,7 +487,12 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
         # that removing it would quietly change the answer.
         decomp_strip = []
         if getattr(args, "decomp", True):
-            blocking = metals_blocking_decomp(u, occ.probe_resid)
+            # `u` is topology-only and has no coordinates, so the proximity check needs
+            # a universe with frames. Use the first selected frame of the first record.
+            probe_occ, probe_frames = selections[0]
+            coord_u = mda.Universe(probe_occ.topology, probe_occ.trajectory)
+            blocking = metals_blocking_decomp(coord_u, occ.probe_resid,
+                                              frame=probe_frames[0])
             too_close = [m for m in blocking if m[2] < DECOMP_METAL_MIN_DIST_ANG]
             if too_close:
                 name, resid, dist = too_close[0]

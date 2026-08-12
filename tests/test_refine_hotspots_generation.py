@@ -514,3 +514,41 @@ def test_no_decomp_flag_parses():
 
     assert build_parser().parse_args(["--config", "a.yaml"]).decomp is True
     assert build_parser().parse_args(["--config", "a.yaml", "--no-decomp"]).decomp is False
+
+
+def test_unmeasurable_metal_distance_is_refused_not_waved_through():
+    """A topology-only Universe gives nan; nan < threshold is False, so a silent pass
+    would disable the proximity gate entirely."""
+    import MDAnalysis as mda
+
+    from cosolvkit.cli.refine_hotspots_jobs import metals_blocking_decomp
+
+    u = mda.Universe.empty(3, n_residues=3, n_segments=1, atom_resindex=[0, 1, 2],
+                           residue_segindex=[0, 0, 0], trajectory=False)
+    u.add_TopologyAttr("name", ["CA", "MN", "C1"])
+    u.add_TopologyAttr("resname", ["ALA", "MN", "FMD"])
+    u.add_TopologyAttr("resid", [1, 2, 3])
+    with pytest.raises(ValueError, match="not finite|no coordinates"):
+        metals_blocking_decomp(u, ligand_resid=3)
+
+
+def test_close_metal_blocks_a_decomposition_run(tmp_path):
+    """Dropping a metal 2 A from the ligand would change the answer, so the run stops."""
+    from cosolvkit.cli.refine_hotspots_jobs import _build_mmgbsa_inputs
+
+    sim = _system(tmp_path, cosolvents=("FMD",))
+    u = mda.Universe(sim.topology)
+    # Rename one ALA to MN so it sits right beside the probes in the same tiny box.
+    import MDAnalysis as _mda
+    tag_dir = tmp_path / "hs_FMD_12"
+    tag_dir.mkdir()
+    metal_pdb = str(tmp_path / "metal.pdb")
+    u2 = _mda.Universe(sim.topology)
+    u2.residues[0].resname = "MN"
+    u2.atoms.write(metal_pdb)
+    sim_metal = SimulationEntry(trajectory=sim.trajectory, topology=metal_pdb,
+                                cosolvents=["FMD"], label=sim.label)
+    occ = _occ(sim_metal, 5, 4)
+    with pytest.raises(ValueError, match="decomposition"):
+        _build_mmgbsa_inputs(_config([sim_metal]), _hotspot(occ), "hs_FMD_12",
+                             str(tag_dir), _args())
