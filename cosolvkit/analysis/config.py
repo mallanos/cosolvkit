@@ -32,6 +32,9 @@ class SimulationEntry:
     topology:    str
     cosolvents:  List[str]
     label:       Optional[str] = None
+    # A prmtop carries no chain IDs. This PDB, whose protein residues must match the
+    # topology's in count, order and resname, restores them.
+    chain_reference: Optional[str] = None
 
 
 @dataclass
@@ -203,7 +206,8 @@ class AnalysisConfig:
                 raise ValueError(
                     f"simulations[{i}] is missing required keys: {missing}"
                 )
-            unknown_sim = set(s) - {"trajectory", "topology", "cosolvents", "label"}
+            unknown_sim = set(s) - {"trajectory", "topology", "cosolvents", "label",
+                                    "chain_reference"}
             if unknown_sim:
                 raise ValueError(
                     f"simulations[{i}] has unknown keys: {sorted(unknown_sim)}"
@@ -213,6 +217,7 @@ class AnalysisConfig:
                 topology=resolve(s["topology"]),
                 cosolvents=list(s["cosolvents"]),
                 label=s.get("label"),
+                chain_reference=resolve(s.get("chain_reference")),
             ))
 
         def _parse(section_cls, raw_dict):

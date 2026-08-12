@@ -266,3 +266,43 @@ class OccupancyAnnotator:
         calc.logger = self.logger
         PocketPropertyCalculator.find_pocket_residues(
             calc, hotspot, cutoff=self.residue_cutoff)
+
+
+def apply_chain_reference(hotspots, reference_universe, topology_universe):
+    """Copy chain IDs from a reference PDB onto pocket residues, by residue order.
+
+    A prmtop has no chain information, so every segid reads ``SYSTEM``; on a homodimer
+    that would make two symmetric pockets indistinguishable. Protein residues appear in
+    the same order in a run's ``system.pdb`` and ``system.prmtop``, so position-wise
+    mapping is exact — and it is validated, because a silently misassigned chain would
+    swap two symmetric pockets.
+
+    :param hotspots: hotspots whose ``pocket_residues`` to relabel.
+    :param reference_universe: Universe of the chain reference PDB.
+    :param topology_universe: Universe of the analysis topology.
+    :raises ValueError: on protein residue count or resname mismatch.
+    """
+    top_res = topology_universe.select_atoms("protein").residues
+    ref_res = reference_universe.select_atoms("protein").residues
+
+    if len(top_res) != len(ref_res):
+        raise ValueError(
+            f"chain_reference protein residue count {len(ref_res)} does not match the "
+            f"topology's {len(top_res)}; the reference is for a different system."
+        )
+    mismatch = [i for i, (a, b) in enumerate(zip(top_res.resnames, ref_res.resnames))
+                if a != b]
+    if mismatch:
+        i = mismatch[0]
+        raise ValueError(
+            f"chain_reference resname mismatch at protein residue {i}: topology has "
+            f"{top_res.resnames[i]}, reference has {ref_res.resnames[i]}."
+        )
+
+    chain_by_resindex = dict(zip(top_res.resindices, ref_res.segids))
+    for h in hotspots:
+        for pr in h.pocket_residues:
+            chain = chain_by_resindex.get(pr.resindex)
+            if chain is not None:
+                pr.chain = str(chain)
+                pr.chain_source = "chain_reference"
