@@ -60,3 +60,60 @@ def test_round_trip_through_dict():
     occ = _occ([1, 2, 3])
     back = ProbeOccupancy.from_dict(occ.to_dict())
     assert back == occ
+
+
+from cosolvkit.analysis.core.models import Hotspot, PoseRef
+
+
+def _hotspot_with(*occs):
+    h = Hotspot(rank=1, site_id=1, cosolvent="FMD")
+    h.probe_occupancy = list(occs)
+    return h
+
+
+def _named(label, resid, frames, stride=1, n_scanned=100):
+    return ProbeOccupancy(
+        source_label=label, topology=f"/tmp/{label}.prmtop",
+        trajectory=f"/tmp/{label}.dcd", probe_resname="FMD",
+        probe_resid=resid, probe_resindex=resid - 1, frames=list(frames),
+        n_frames_scanned=n_scanned, stride=stride,
+    )
+
+
+def test_new_hotspot_has_no_occupancy():
+    h = Hotspot(rank=1, site_id=1, cosolvent="FMD")
+    assert h.probe_occupancy == []
+    assert h.n_probe_molecules == 0
+    assert h.total_residence_frames == 0
+    assert h.best_pose() is None
+
+
+def test_rollups_count_molecules_and_frames():
+    h = _hotspot_with(_named("r0", 279, [1, 2]), _named("r1", 280, [5, 6, 7]))
+    assert h.n_probe_molecules == 2
+    assert h.total_residence_frames == 5
+    assert sorted(h.occupancy_by_probe()) == ["FMD"]
+    assert len(h.occupancy_by_probe()["FMD"]) == 2
+
+
+def test_best_pose_picks_the_longest_episode():
+    short = _named("r0", 279, [1, 2])
+    long_ = _named("r1", 280, [40, 41, 42, 43])
+    pose = _hotspot_with(short, long_).best_pose()
+    assert pose.probe_resid == 280
+    assert pose.source_label == "r1"
+    assert pose.episode == (40, 43)
+
+
+def test_best_pose_frame_is_a_sampled_frame_near_the_midpoint():
+    # midpoint of (0, 30) is 15, which is not sampled; frame 20 is the nearest that is
+    pose = _hotspot_with(_named("r0", 279, [0, 20, 30], stride=10)).best_pose()
+    assert pose.frame == 20
+    assert pose.amber_mask == ":279"
+
+
+def test_best_pose_tie_breaks_deterministically_on_source_then_resid():
+    a = _named("r1", 300, [10, 11])
+    b = _named("r0", 279, [50, 51])
+    assert _hotspot_with(a, b).best_pose().source_label == "r0"
+    assert _hotspot_with(b, a).best_pose().source_label == "r0"

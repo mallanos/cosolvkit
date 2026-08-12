@@ -115,6 +115,24 @@ class ProbeOccupancy:
         )
 
 
+@dataclass
+class PoseRef:
+    """A single frame identifying one probe molecule bound in one hotspot."""
+
+    source_label:   str
+    topology:       str
+    trajectory:     str
+    frame:          int
+    probe_resname:  str
+    probe_resid:    int
+    probe_resindex: int
+    episode:        Tuple[int, int]
+
+    @property
+    def amber_mask(self) -> str:
+        return f":{self.probe_resid}"
+
+
 # ---------------------------------------------------------------------------
 # PocketResidue — per-residue data attached to a Hotspot
 # ---------------------------------------------------------------------------
@@ -277,6 +295,7 @@ class Hotspot:
         self.per_type_agfe = dict(per_type_agfe) if per_type_agfe else {}  # min AGFE per type
         self.properties = {}
         self.pocket_residues = []                     # populated on demand
+        self.probe_occupancy = []                     # List[ProbeOccupancy]
         # Grid metadata, set by HotspotDetector.detect() after construction; required to
         # combine voxel masks across grids (e.g. binding-site grouping).
         self.grid_origin = None                       # np.ndarray (3,), Angstroms
@@ -285,6 +304,56 @@ class Hotspot:
     def add_property(self, name, value):
         """Attach an arbitrary named property."""
         self.properties[name] = value
+
+    @property
+    def n_probe_molecules(self):
+        return len(self.probe_occupancy)
+
+    @property
+    def total_residence_frames(self):
+        return sum(o.n_frames_bound for o in self.probe_occupancy)
+
+    def occupancy_by_probe(self):
+        """``{probe_resname: [ProbeOccupancy, ...]}``."""
+        out = {}
+        for occ in self.probe_occupancy:
+            out.setdefault(occ.probe_resname, []).append(occ)
+        return out
+
+    def best_pose(self, gap_tolerance=0):
+        """The most convincing bound frame, or None when nothing ever occupied this site.
+
+        Selects the record with the widest residence episode; ties resolve on higher
+        occupancy fraction, then source label, then resid, so the result is deterministic.
+        The frame returned is the *sampled* frame nearest the episode midpoint — with a
+        stride the arithmetic midpoint need not be a frame that was scanned.
+        """
+        best = None
+        best_key = None
+        for occ in self.probe_occupancy:
+            ep = occ.longest_episode(gap_tolerance)
+            if ep is None:
+                continue
+            key = (-(ep[1] - ep[0]), -occ.occupancy_fraction,
+                   occ.source_label, occ.probe_resid)
+            if best_key is None or key < best_key:
+                best_key, best = key, (occ, ep)
+        if best is None:
+            return None
+        occ, ep = best
+        midpoint = (ep[0] + ep[1]) / 2.0
+        frame = min((f for f in occ.frames if ep[0] <= f <= ep[1]),
+                    key=lambda f: (abs(f - midpoint), f))
+        return PoseRef(
+            source_label=occ.source_label,
+            topology=occ.topology,
+            trajectory=occ.trajectory,
+            frame=int(frame),
+            probe_resname=occ.probe_resname,
+            probe_resid=occ.probe_resid,
+            probe_resindex=occ.probe_resindex,
+            episode=ep,
+        )
 
     @classmethod
     def from_dict(cls, d, voxel_mask, grid_origin, grid_delta):
