@@ -57,3 +57,47 @@ def test_occupancy_rows_are_one_per_record():
 
 def test_hotspots_without_occupancy_contribute_no_rows():
     assert occupancy_rows({"FMD": [Hotspot(rank=1, site_id=1, cosolvent="FMD")]}) == []
+
+
+def test_rows_carry_the_file_a_frame_index_belongs_to():
+    """A frame number is trajectory-local, so it is meaningless without its source
+    file; the whole point of the design is that link."""
+    rows = occupancy_rows({"FMD": [_hotspot_with_two_records()]})
+    first = next(r for r in rows if r["probe_resid"] == 279)
+    assert first["topology"] == "/tmp/a.prmtop"
+    assert first["trajectory"] == "/tmp/a.dcd"
+    second = next(r for r in rows if r["probe_resid"] == 280)
+    assert second["trajectory"] == "/tmp/b.dcd"
+
+
+def test_gap_tolerance_reaches_the_episode_columns():
+    """Pose selection uses --gap-tolerance; hardcoding 0 here made the CSV describe a
+    different episode than the pose that was actually written."""
+    h = Hotspot(rank=1, site_id=1, cosolvent="FMD")
+    h.probe_occupancy = [
+        ProbeOccupancy(source_label="r0", topology="/tmp/a.prmtop",
+                       trajectory="/tmp/a.dcd", probe_resname="FMD", probe_resid=279,
+                       probe_resindex=278, frames=[1, 2, 4, 5], n_frames_scanned=10,
+                       stride=1),
+    ]
+    strict = occupancy_rows({"FMD": [h]}, gap_tolerance=0)[0]
+    assert strict["n_episodes"] == 2 and strict["longest_end"] == 2
+
+    lenient = occupancy_rows({"FMD": [h]}, gap_tolerance=1)[0]
+    assert lenient["n_episodes"] == 1
+    assert (lenient["longest_start"], lenient["longest_end"]) == (1, 5)
+
+
+def test_slurm_template_help_does_not_promise_a_packaged_default():
+    """There is no packaged template — only the inline block in refine_hotspots_jobs."""
+    action = next(a for a in build_parser()._actions
+                  if a.dest == "slurm_template")
+    assert "packaged" not in action.help
+    assert "{{WORKDIR}}" in action.help, (
+        "a custom template must be told it is responsible for the cd"
+    )
+
+
+def test_frame_strategy_is_exposed():
+    args = build_parser().parse_args(["--config", "a.yaml"])
+    assert args.mmgbsa_frame_strategy == "random"

@@ -54,11 +54,18 @@ def build_parser():
     p.add_argument("--submit", action="store_true",
                    help="sbatch the generated qfiles instead of only writing them.")
     p.add_argument("--slurm-template", default=None,
-                   help="SLURM template; the packaged default is used when omitted.")
+                   help="Optional SLURM template file. Placeholders {{NAME}}, {{SCRIPT}} "
+                        "and {{WORKDIR}} are substituted; a template must cd to "
+                        "{{WORKDIR}} itself. Omitted, a built-in block is written.")
     p.add_argument("--mmgbsa-n-frames", type=int, default=20,
                    help="Frames to extract per MMGBSA job (default: 20).")
     p.add_argument("--mmgbsa-n-molecules", type=int, default=1,
-                   help="Occupying molecules to emit a job for, best first (default: 1).")
+                   help="Occupying molecules to emit a job for, best first (default: 1). "
+                        "Each gets its own subdirectory under the target's mmgbsa/.")
+    p.add_argument("--mmgbsa-frame-strategy", choices=["random", "cluster"],
+                   default="random",
+                   help="How to pick frames within a record (default: random). "
+                        "'cluster' is reserved and not implemented yet.")
     p.add_argument("--mmgbsa-source", default=None,
                    help="Restrict MMGBSA frame selection to this simulation label.")
     p.add_argument("--seed", type=int, default=0,
@@ -66,18 +73,26 @@ def build_parser():
     return p
 
 
-def occupancy_rows(results):
-    """Flatten ``{cosolvent: [Hotspot]}`` into one row per ProbeOccupancy record."""
+def occupancy_rows(results, gap_tolerance=0):
+    """Flatten ``{cosolvent: [Hotspot]}`` into one row per ProbeOccupancy record.
+
+    *gap_tolerance* must be the value pose selection uses, or the episodes reported here
+    disagree with the episode the chosen pose actually came from. ``topology`` and
+    ``trajectory`` are carried on every row because a frame index is trajectory-local and
+    therefore meaningless without the file it indexes.
+    """
     rows = []
     for cosolvent, hotspots in results.items():
         for h in hotspots:
             for occ in h.probe_occupancy:
-                episodes = occ.episodes()
-                longest = occ.longest_episode()
+                episodes = occ.episodes(gap_tolerance)
+                longest = occ.longest_episode(gap_tolerance)
                 rows.append({
                     "site_id": h.site_id,
                     "cosolvent": cosolvent,
                     "source_label": occ.source_label,
+                    "topology": occ.topology,
+                    "trajectory": occ.trajectory,
                     "probe_resname": occ.probe_resname,
                     "probe_resid": occ.probe_resid,
                     "probe_resindex": occ.probe_resindex,
@@ -127,13 +142,16 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
 
     config = AnalysisConfig.from_yaml(args.config)
-    checkpoint_dir = args.checkpoint or os.path.join(config.out_path, "merged")
+    # Resolve once and write it back, so job generation reads the merged maps from the
+    # same directory the hotspots were loaded from.
+    args.checkpoint = checkpoint_dir = (args.checkpoint
+                                        or os.path.join(config.out_path, "merged"))
     out_dir = args.out or os.path.join(config.out_path, "refine")
     os.makedirs(out_dir, exist_ok=True)
 
     results = annotate(config, checkpoint_dir, args)
 
-    rows = occupancy_rows(results)
+    rows = occupancy_rows(results, gap_tolerance=args.gap_tolerance)
     csv_path = os.path.join(out_dir, "hotspot_occupancy.csv")
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     logger.info("Wrote %d occupancy records to %s.", len(rows), csv_path)
