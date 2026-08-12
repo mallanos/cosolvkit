@@ -116,6 +116,60 @@ class ProbeOccupancy:
 
 
 @dataclass
+class MmgbsaResult:
+    """An MMGBSA interaction energy for one probe molecule in one hotspot.
+
+    A single-trajectory interaction energy over the frames that molecule actually
+    occupied the site — useful for RANKING hotspots, not as an absolute affinity.
+    ``components`` holds the raw Differences table keyed by MMPBSA component name
+    (``VDWAALS``, ``EEL``, ``EGB``, ``ESURF``, ``DELTA G gas``, ``DELTA G solv``).
+    """
+
+    probe_resname:  str
+    probe_resid:    int       # resid in the ORIGINAL topology, not the stripped complex
+    source_label:   str
+    delta_total:    float     # kcal/mol
+    std_dev:        float
+    std_err:        float
+    n_frames:       int
+    components:     Dict[str, Dict[str, float]] = field(default_factory=dict)
+    results_path:   Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "probe_resname": self.probe_resname,
+            "probe_resid": int(self.probe_resid),
+            "source_label": self.source_label,
+            "delta_total": float(self.delta_total),
+            "std_dev": float(self.std_dev),
+            "std_err": float(self.std_err),
+            "n_frames": int(self.n_frames),
+            "components": {
+                k: {kk: float(vv) for kk, vv in v.items()}
+                for k, v in self.components.items()
+            },
+            "results_path": self.results_path,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "MmgbsaResult":
+        return cls(
+            probe_resname=str(d["probe_resname"]),
+            probe_resid=int(d["probe_resid"]),
+            source_label=str(d["source_label"]),
+            delta_total=float(d["delta_total"]),
+            std_dev=float(d["std_dev"]),
+            std_err=float(d["std_err"]),
+            n_frames=int(d["n_frames"]),
+            components={
+                k: {kk: float(vv) for kk, vv in v.items()}
+                for k, v in (d.get("components") or {}).items()
+            },
+            results_path=d.get("results_path"),
+        )
+
+
+@dataclass
 class PoseRef:
     """A single frame identifying one probe molecule bound in one hotspot."""
 

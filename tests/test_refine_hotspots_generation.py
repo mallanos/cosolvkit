@@ -457,3 +457,60 @@ def test_ligand_index_counts_only_survivors_before_it():
     idx = post_strip_ligand_index(_stripping_universe(), strip_resnames=set(),
                                   excluded_resids=set(), keep_resid=6)
     assert idx == 6
+
+
+# ---------------------------------------------------------------------------
+# Metal handling under decomposition — found by a real MMPBSA run where sander
+# aborted with "bad atom type: Mn" the moment idecomp was switched on.
+# ---------------------------------------------------------------------------
+
+def _metal_universe(metal_xyz, ligand_xyz, metal_resname="MN"):
+    import MDAnalysis as mda
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    resnames = ["ALA", metal_resname, "FMD"]
+    u = mda.Universe.empty(3, n_residues=3, n_segments=1, atom_resindex=[0, 1, 2],
+                           residue_segindex=[0, 0, 0], trajectory=True)
+    u.add_TopologyAttr("name", ["CA", metal_resname, "C1"])
+    u.add_TopologyAttr("resname", resnames)
+    u.add_TopologyAttr("resid", [1, 2, 3])
+    coords = np.array([[[0.0, 0.0, 0.0], metal_xyz, ligand_xyz]], dtype=np.float32)
+    u.load_new(coords, order="fac", format=MemoryReader,
+               dimensions=np.array([[80.0] * 3 + [90.0] * 3]))
+    return u
+
+
+def test_distant_metal_is_reported_with_its_distance():
+    from cosolvkit.cli.refine_hotspots_jobs import metals_blocking_decomp
+
+    u = _metal_universe([20.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+    found = metals_blocking_decomp(u, ligand_resid=3)
+    assert len(found) == 1
+    name, resid, dist = found[0]
+    assert (name, resid) == ("MN", 2)
+    assert dist == pytest.approx(20.0)
+
+
+def test_a_protein_without_metals_reports_nothing():
+    from cosolvkit.cli.refine_hotspots_jobs import metals_blocking_decomp
+
+    u = _metal_universe([20.0, 0.0, 0.0], [0.0, 0.0, 0.0], metal_resname="GLY")
+    assert metals_blocking_decomp(u, ligand_resid=3) == []
+
+
+def test_decomp_block_is_present_only_when_requested():
+    from cosolvkit.cli.refine_hotspots_jobs import (
+        DECOMP_BLOCK, MMPBSA_IN_TEMPLATE,
+    )
+
+    on = MMPBSA_IN_TEMPLATE.format(strip_mask=":X", decomp=DECOMP_BLOCK)
+    off = MMPBSA_IN_TEMPLATE.format(strip_mask=":X", decomp="")
+    assert "idecomp=1" in on and "csv_format=1" in on
+    assert "&decomp" not in off
+
+
+def test_no_decomp_flag_parses():
+    from cosolvkit.cli.refine_hotspots import build_parser
+
+    assert build_parser().parse_args(["--config", "a.yaml"]).decomp is True
+    assert build_parser().parse_args(["--config", "a.yaml", "--no-decomp"]).decomp is False

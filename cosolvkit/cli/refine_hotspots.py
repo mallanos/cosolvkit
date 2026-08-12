@@ -57,6 +57,11 @@ def build_parser():
                    help="Optional SLURM template file. Placeholders {{NAME}}, {{SCRIPT}}, "
                         "{{WORKDIR}} and {{PYTHON}} are substituted; a template must cd "
                         "to {{WORKDIR}} itself. Omitted, a built-in block is written.")
+    p.add_argument("--no-decomp", dest="decomp", action="store_false", default=True,
+                   help="Skip per-residue MMGBSA decomposition. Decomposition forces "
+                        "gbsa=2 (ICOSA), which sander cannot atom-type for transition "
+                        "metals, so a metalloprotein either drops the metal or uses "
+                        "this flag to keep it.")
     p.add_argument("--python-exe", dest="python_exe", default=None,
                    help="Interpreter the generated SLURM jobs run (default: the one "
                         "running this command). Must be able to import autopath and "

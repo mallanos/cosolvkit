@@ -32,6 +32,17 @@ SOLVENT_STRIP = ":POP:HOH:WAT:NA:CL:K:MG"
 # in place (it matches on the leading '#startframe'/'#endframe'/'#interval'), so those
 # must stay exactly as written here; ``strip_mask`` is likewise matched by prefix when
 # persistent waters are requested.
+# Residues sander cannot atom-type for the ICOSA surface area that per-residue
+# decomposition forces (MMPBSA sets gbsa=2 whenever idecomp is on). Verified on FosAKP:
+# with MN present sander aborts with "bad atom type: Mn" and no usable error in the
+# mdout. The other transition metals are the same class and are listed pre-emptively.
+# Only relevant to decomposition runs; a plain MMGBSA run keeps them.
+DECOMP_UNSUPPORTED_RESNAMES = ("MN", "ZN", "FE", "CO", "NI", "CU", "CD", "HG")
+
+# Below this ligand-to-metal distance, dropping the metal changes the interaction
+# energy enough that doing it silently would be dishonest, so the run stops instead.
+DECOMP_METAL_MIN_DIST_ANG = 6.0
+
 MMPBSA_IN_TEMPLATE = """\
 &general
 use_sander=1,
@@ -50,6 +61,17 @@ strip_mask= "{strip_mask}"
 &gb
 igb=8,
 saltcon=0.15,
+/
+{decomp}"""
+
+# The qfile already passes -do FINAL_DECOMP_mmpbsa.dat, but MMPBSA writes nothing
+# without this section. csv_format=1 is what
+# ProteinLigandAnalyzer.parse_mmpbsa_deltas_all_components expects.
+DECOMP_BLOCK = """\
+&decomp
+idecomp=1,
+dec_verbose=3,
+csv_format=1,
 /
 """
 
@@ -361,6 +383,30 @@ def cosolvent_species_for(config, source_label, fallback):
     return [fallback]
 
 
+def metals_blocking_decomp(universe, ligand_resid, frame=None):
+    """Metal residues that would abort a decomposition run, with their ligand distance.
+
+    :return: ``[(resname, resid, min_distance_to_ligand_ang), ...]``, nearest first.
+    """
+    present = [r for r in universe.residues
+               if r.resname in DECOMP_UNSUPPORTED_RESNAMES]
+    if not present:
+        return []
+    if frame is not None and getattr(universe, "trajectory", None) is not None:
+        universe.trajectory[frame]
+    ligand = universe.select_atoms(f"resid {ligand_resid}")
+    out = []
+    for res in present:
+        try:
+            dist = float(np.linalg.norm(
+                res.atoms.positions[:, None, :] - ligand.positions[None, :, :],
+                axis=-1).min())
+        except (ValueError, IndexError):
+            dist = float("nan")
+        out.append((res.resname, int(res.resid), dist))
+    return sorted(out, key=lambda t: (np.isnan(t[2]), t[2]))
+
+
 def post_strip_ligand_index(universe, strip_resnames, excluded_resids, keep_resid):
     """1-based index of *keep_resid* in the topology AFTER the strip mask is applied.
 
@@ -425,11 +471,41 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
         others = amber_exclude_mask(all_resids, keep=occ.probe_resid)
         strip = SOLVENT_STRIP + others
 
+        # Per-residue decomposition forces gbsa=2 (ICOSA), which sander cannot atom-type
+        # for transition metals — it aborts with "bad atom type: Mn". Drop them for
+        # decomposition runs only, and refuse when one sits close enough to the ligand
+        # that removing it would quietly change the answer.
+        decomp_strip = []
+        if getattr(args, "decomp", True):
+            blocking = metals_blocking_decomp(u, occ.probe_resid)
+            too_close = [m for m in blocking if m[2] < DECOMP_METAL_MIN_DIST_ANG]
+            if too_close:
+                name, resid, dist = too_close[0]
+                raise ValueError(
+                    f"{name} {resid} is {dist:.2f} A from {occ.probe_resname} "
+                    f"{occ.probe_resid}. Per-residue decomposition cannot run with it "
+                    f"present (sander cannot atom-type it), but dropping a metal that "
+                    f"close would change the interaction energy. Re-run with "
+                    f"--no-decomp to keep the metal, or raise the risk knowingly."
+                )
+            for name, resid, dist in blocking:
+                decomp_strip.append(name)
+                logger.warning(
+                    "%s: dropping %s %d (%.1f A from the ligand) so per-residue "
+                    "decomposition can run; it stays in a --no-decomp run.",
+                    sysname, name, resid, dist,
+                )
+            if decomp_strip:
+                strip = strip + ":" + ":".join(sorted(set(decomp_strip)))
+
         # ante-MMPBSA resolves the ligand against the STRIPPED complex, which is
         # renumbered from 1, so the original resid would select nothing there.
+        # decomp_strip must be included: dropping the metals shifts every residue after
+        # them, so omitting it here would point the ligand mask at the wrong residue.
         ligand_index = post_strip_ligand_index(
             u,
-            strip_resnames={n for n in SOLVENT_STRIP.strip(":").split(":") if n},
+            strip_resnames=({n for n in SOLVENT_STRIP.strip(":").split(":") if n}
+                            | set(decomp_strip)),
             excluded_resids=all_resids - {occ.probe_resid},
             keep_resid=occ.probe_resid,
         )
@@ -440,7 +516,9 @@ def _build_mmgbsa_inputs(config, target, tag, tag_dir, args):
 
         mmpbsa_in = os.path.join(mm_dir, "mmgbsa.in")
         with open(mmpbsa_in, "w") as fh:
-            fh.write(MMPBSA_IN_TEMPLATE.format(strip_mask=strip))
+            fh.write(MMPBSA_IN_TEMPLATE.format(
+                strip_mask=strip,
+                decomp=DECOMP_BLOCK if getattr(args, "decomp", True) else ""))
 
         specs.append({
             "sysname": sysname,
