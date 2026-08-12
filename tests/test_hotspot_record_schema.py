@@ -89,3 +89,27 @@ def test_unknown_schema_raises_rather_than_guessing():
     rec["schema"] = 99
     with pytest.raises(ValueError, match="schema"):
         Hotspot.from_record(rec, h.voxel_mask, h.grid_origin, h.grid_delta)
+
+
+def test_export_writes_no_json_and_a_flat_csv(tmp_path):
+    """Regression: nested fields must not reach the CSV, and the JSON export is gone."""
+    import logging
+
+    import pandas as pd
+
+    from cosolvkit.analysis.sites.detect import HotspotDetector
+
+    # Built with __new__ so no Universe or grid is needed; export_results only reads
+    # out_path, logger and (when label_map=True) _labeled_arrays.
+    detector = HotspotDetector.__new__(HotspotDetector)
+    detector._out_path = str(tmp_path)
+    detector.logger = logging.getLogger("test")
+    detector._labeled_arrays = {}
+
+    HotspotDetector.export_results(detector, {"FMD": [_loaded_hotspot()]}, label_map=False)
+
+    assert (tmp_path / "hotspot_sites_FMD.csv").exists()
+    assert not (tmp_path / "hotspot_sites_FMD.json").exists()
+    df = pd.read_csv(tmp_path / "hotspot_sites_FMD.csv")
+    assert "pocket_residues" not in df.columns
+    assert df.loc[0, "n_probe_molecules"] == 1

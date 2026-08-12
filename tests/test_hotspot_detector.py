@@ -130,10 +130,8 @@ class TestExportResults:
         d.export_results(results, label_map=False)
         assert (tmp_path / "hotspot_sites_BEN.csv").exists()
         assert (tmp_path / "hotspot_sites_all.tsv").exists()
-        with open(tmp_path / "hotspot_sites_BEN.json") as f:
-            data = json.load(f)
-        assert isinstance(data, list)
-        assert len(data) >= 1
+        assert not (tmp_path / "hotspot_sites_BEN.json").exists()
+        df = pd.read_csv(tmp_path / "hotspot_sites_BEN.csv")
 
     def test_csv_has_expected_columns(self, tmp_path):
         import pandas as pd

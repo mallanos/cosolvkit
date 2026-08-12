@@ -563,7 +563,7 @@ class HotspotDetector:
     # ------------------------------------------------------------------
 
     def export_results(self, results, label_map=False):
-        """Export hotspot results to CSV, JSON, and a label DX map.
+        """Export hotspot results to CSV and a label DX map.
 
         Parameters
         ----------
@@ -581,17 +581,14 @@ class HotspotDetector:
                 self.logger.warning(f"No hotspots to export for '{cosolvent}'.")
                 continue
 
-            rows = [s.to_dict() for s in sites]
+            rows = [s.to_row() for s in sites]
             df = pd.DataFrame(rows)
 
             geom_cols = [c for c in df.columns if c.startswith(GEOM_PREFIX)]
             main_df = df.drop(columns=geom_cols)
 
             csv_path = os.path.join(self.out_path, f"hotspot_sites_{cosolvent}.csv")
-            json_path = os.path.join(self.out_path, f"hotspot_sites_{cosolvent}.json")
             main_df.to_csv(csv_path, index=False)
-            with open(json_path, "w") as fh:
-                json.dump(rows, fh, indent=2)            # JSON keeps the full record
 
             if geom_cols:
                 geom_path = os.path.join(self.out_path, f"hotspot_sites_geom_{cosolvent}.csv")
@@ -599,8 +596,7 @@ class HotspotDetector:
                 self.logger.info(f"Exported geometry sidecar: {geom_path}")
 
             self.logger.info(
-                f"Exported {len(sites)} hotspot(s) for '{cosolvent}': "
-                f"{csv_path}, {json_path}"
+                f"Exported {len(sites)} hotspot(s) for '{cosolvent}': {csv_path}"
             )
             all_rows.extend(rows)
 
@@ -736,11 +732,7 @@ class HotspotDetector:
                 else np.zeros(3, dtype=float)
             )
 
-            meta = []
-            for s in sites:
-                m = s.to_dict()
-                m["_properties"] = s.properties
-                meta.append(m)
+            meta = [s.to_record() for s in sites]
 
             npz_path = os.path.join(chk_dir, f"hotspot_checkpoint_{cosolvent}.npz")
             np.savez_compressed(
@@ -796,7 +788,7 @@ class HotspotDetector:
             grid_delta = data["grid_delta"]
 
             sites = [
-                Hotspot.from_dict(m, voxel_masks[i].astype(bool), grid_origin, grid_delta)
+                Hotspot.from_record(m, voxel_masks[i].astype(bool), grid_origin, grid_delta)
                 for i, m in enumerate(meta)
             ]
             results[cosolvent] = sites
