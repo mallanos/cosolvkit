@@ -47,6 +47,7 @@ setup(name="cosolvkit",
               'create_cosolvent_system=cosolvkit.cli.create_cosolvent_system:main',
               'analyze_cosolvent_simulation=cosolvkit.cli.analyze_cosolvent_simulation:main',
               'visualize_hotspots=cosolvkit.cli.visualize_hotspots:main',
+              'refine_hotspots=cosolvkit.cli.refine_hotspots:main',
           ]
       }
       
