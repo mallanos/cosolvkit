@@ -377,52 +377,10 @@ class Hotspot:
             episode=ep,
         )
 
-    @classmethod
-    def from_dict(cls, d, voxel_mask, grid_origin, grid_delta):
-        """Reconstruct a Hotspot from checkpointed metadata plus its voxel mask.
-
-        Inverse of :meth:`HotspotDetector.save_checkpoint`, not of the CSV/JSON
-        exports (those carry no voxel mask).
-
-        :param d: metadata as produced by :meth:`to_dict`, optionally with a
-            ``_properties`` key holding the extensible properties dict.
-        :param voxel_mask: 3-D boolean array of shape ``(nx, ny, nz)``.
-        :param grid_origin: shape ``(3,)`` AGFE grid origin, Angstroms.
-        :param grid_delta: shape ``(3,)`` voxel spacing, Angstroms.
-        """
-        favorable_atomtypes = (
-            d["favorable_atomtypes"].split(",")
-            if d.get("favorable_atomtypes")
-            else []
-        )
-        per_type_agfe = {
-            k[5:]: float(v)
-            for k, v in d.items()
-            if k.startswith("agfe_") and k not in ("agfe_min", "agfe_mean_top_pct")
-        }
-        site = cls(
-            rank=int(d["rank"]),
-            site_id=int(d["site_id"]),
-            cosolvent=str(d["cosolvent"]),
-            n_voxels=int(d["n_voxels"]),
-            centroid=np.array([d["centroid_x"], d["centroid_y"], d["centroid_z"]], dtype=float),
-            agfe_min=float(d["agfe_min"]),
-            agfe_mean_top_pct=float(d["agfe_mean_top_pct"]),
-            voxel_mask=voxel_mask,
-            favorable_atomtypes=favorable_atomtypes,
-            per_type_agfe=per_type_agfe,
-        )
-        site.properties = dict(d.get("_properties", {}))
-        site.pocket_residues = [
-            PocketResidue.from_dict(r) for r in d.get("pocket_residues", [])
-        ]
-        site.grid_origin = np.asarray(grid_origin, dtype=float)
-        site.grid_delta = np.asarray(grid_delta, dtype=float)
-        return site
-
-    def to_dict(self):
-        """Flat dict for CSV/JSON export. Includes base scores and ``properties``."""
+    def to_row(self):
+        """Flat scalar dict for CSV/TSV export. Contains no list or dict values."""
         cent = self.centroid if self.centroid is not None else (None, None, None)
+        pose = self.best_pose()
         d = {
             "rank": self.rank,
             "site_id": self.site_id,
@@ -434,12 +392,81 @@ class Hotspot:
             "agfe_min": _round_or_none(self.agfe_min),
             "agfe_mean_top_pct": _round_or_none(self.agfe_mean_top_pct),
             "favorable_atomtypes": ",".join(self.favorable_atomtypes),
+            "n_probe_molecules": self.n_probe_molecules,
+            "total_residence_frames": self.total_residence_frames,
+            "best_probe": pose.probe_resname if pose else None,
+            "best_source": pose.source_label if pose else None,
+            "best_frame": pose.frame if pose else None,
         }
         d.update({f"agfe_{k}": _round_or_none(v) for k, v in self.per_type_agfe.items()})
-        d.update(self.properties)
-        if self.pocket_residues:
-            d["pocket_residues"] = [r.to_dict() for r in self.pocket_residues]
+        d.update({k: v for k, v in self.properties.items()
+                  if not isinstance(v, (list, dict))})
         return d
+
+    # Retained because the dashboard, the PyMOL session writer and visualize_hotspots
+    # all consume the flat shape.
+    def to_dict(self):
+        """Alias of :meth:`to_row`."""
+        return self.to_row()
+
+    def to_record(self):
+        """Canonical nested dict — the single source of truth for persistence."""
+        rec = self.to_row()
+        rec["schema"] = 2
+        rec["properties"] = self.properties
+        rec["pocket_residues"] = [r.to_dict() for r in self.pocket_residues]
+        rec["probe_occupancy"] = [o.to_dict() for o in self.probe_occupancy]
+        return rec
+
+    @classmethod
+    def from_record(cls, d, voxel_mask, grid_origin, grid_delta):
+        """Rebuild a Hotspot from :meth:`to_record` output plus its voxel mask.
+
+        Dispatches on ``schema``. Schema 1 is the pre-unification flat dict with a nested
+        ``_properties`` key, read so that checkpoints already on disk keep loading.
+
+        :param d: record as produced by :meth:`to_record`.
+        :param voxel_mask: 3-D boolean array of shape ``(nx, ny, nz)``.
+        :param grid_origin: shape ``(3,)`` AGFE grid origin, Angstroms.
+        :param grid_delta: shape ``(3,)`` voxel spacing, Angstroms.
+        """
+        schema = int(d.get("schema", 1))
+        if schema not in (1, 2):
+            raise ValueError(
+                f"Unrecognised hotspot record schema {schema!r}; this build reads 1 and 2."
+            )
+
+        favorable_atomtypes = (
+            d["favorable_atomtypes"].split(",") if d.get("favorable_atomtypes") else []
+        )
+        reserved = {"agfe_min", "agfe_mean_top_pct"}
+        per_type_agfe = {
+            k[5:]: float(v) for k, v in d.items()
+            if k.startswith("agfe_") and k not in reserved and v is not None
+        }
+        site = cls(
+            rank=int(d["rank"]),
+            site_id=int(d["site_id"]),
+            cosolvent=str(d["cosolvent"]),
+            n_voxels=int(d["n_voxels"]),
+            centroid=np.array([d["centroid_x"], d["centroid_y"], d["centroid_z"]],
+                              dtype=float),
+            agfe_min=float(d["agfe_min"]),
+            agfe_mean_top_pct=float(d["agfe_mean_top_pct"]),
+            voxel_mask=voxel_mask,
+            favorable_atomtypes=favorable_atomtypes,
+            per_type_agfe=per_type_agfe,
+        )
+        site.properties = dict(d.get("properties", d.get("_properties", {})))
+        site.pocket_residues = [
+            PocketResidue.from_dict(r) for r in d.get("pocket_residues", [])
+        ]
+        site.probe_occupancy = [
+            ProbeOccupancy.from_dict(o) for o in d.get("probe_occupancy", [])
+        ]
+        site.grid_origin = np.asarray(grid_origin, dtype=float)
+        site.grid_delta = np.asarray(grid_delta, dtype=float)
+        return site
 
     def extract_surface(self, agfe_array, level=0.0, spacing=(1.0, 1.0, 1.0)):
         """Generate a surface mesh for this hotspot using marching cubes.
