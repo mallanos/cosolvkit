@@ -8,11 +8,14 @@
 
 import os
 import shutil
+import logging
 import dataclasses
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_agfe_cutoff(hotspots_cfg, temperature):
@@ -219,6 +222,17 @@ class AnalysisConfig:
                 label=s.get("label"),
                 chain_reference=resolve(s.get("chain_reference")),
             ))
+
+        pdb_topologies = [s.label or s.topology for s in sims
+                          if s.topology.lower().endswith(".pdb")]
+        if pdb_topologies:
+            logger.warning(
+                "PDB topology in use for: %s. A PDB fuses solvent residues and "
+                "renumbers probes from 1, so probe resids collide with protein resids "
+                "and resid-keyed analysis is unreliable. Point 'topology' at the "
+                "matching system.prmtop.",
+                ", ".join(pdb_topologies),
+            )
 
         def _parse(section_cls, raw_dict):
             valid = {f.name for f in dataclasses.fields(section_cls)}
