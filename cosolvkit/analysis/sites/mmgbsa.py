@@ -70,6 +70,11 @@ def check_single_topology(occupancies, open_universe=None):
 
     :raises ValueError: naming the paths and the first field that diverges.
     """
+    if not occupancies:
+        raise ValueError(
+            "check_single_topology requires at least one occupancy record; "
+            "got an empty list."
+        )
     opener = open_universe or (lambda t: _open_universe(t))
     paths = []
     for occ in occupancies:
@@ -120,7 +125,7 @@ def select_frames(occupancy, n_frames, seed=0, strategy="random"):
                 len(frames), occupancy.probe_resname, occupancy.probe_resid,
                 occupancy.source_label, n_frames,
             )
-        return frames
+        return [int(f) for f in frames]
     rng = np.random.default_rng(seed)
     return sorted(int(f) for f in rng.choice(frames, size=n_frames, replace=False))
 

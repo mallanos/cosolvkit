@@ -103,6 +103,11 @@ def test_replicas_differing_only_in_box_share_a_topology():
     assert got == "/tmp/r0.prmtop"
 
 
+def test_empty_occupancy_list_raises_clearly():
+    with pytest.raises(ValueError):
+        check_single_topology([])
+
+
 def test_genuinely_different_systems_raise():
     a, b = _topology_universe(), _topology_universe(charge_offset=0.5)
     with pytest.raises(ValueError, match="topolog"):
