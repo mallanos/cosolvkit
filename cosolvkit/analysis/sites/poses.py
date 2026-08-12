@@ -21,6 +21,31 @@ def _open_universe(topology, trajectory):
     return mda.Universe(topology, trajectory)
 
 
+def _assert_position_equals_resid(written, pocket_selection, out_pdb):
+    """Fail unless 1-based position and ``resid`` coincide for every selected residue.
+
+    ``pocket_selection`` is computed as a POSITION in the written pose (1-based), but
+    AutoPath reads a list as RESIDS of the original PDB and translates them through
+    ``build_residue_mapping`` (``autopath/autopath_core.py``), which keys on
+    ``resid``. The two agree only because a prmtop numbers residues 1..N and the
+    protein is a prefix of the file — a coincidence, not a guarantee. Rather than let a
+    renumbered pose silently restrain the wrong residues, check the coincidence holds.
+
+    :raises ValueError: naming the first position whose resid differs.
+    """
+    residues = written.residues
+    for i in pocket_selection:
+        resid = int(residues[i - 1].resid)
+        if resid != i:
+            raise ValueError(
+                f"pocket_selection is ambiguous for {out_pdb}: residue at position {i} "
+                f"has resid {resid}. AutoPath reads pocket_selection as RESIDS of this "
+                f"PDB, so position-based numbering would restrain the wrong residues. "
+                f"Renumber the pose so resid == position, or pass AutoPath an explicit "
+                f"selection string instead of a list."
+            )
+
+
 def write_pose(pose_ref, out_pdb, protein_selection="protein", pocket_cutoff=5.0,
                open_universe=None):
     """Write protein plus one bound probe molecule as a complex PDB for AutoPath.
@@ -31,7 +56,9 @@ def write_pose(pose_ref, out_pdb, protein_selection="protein", pocket_cutoff=5.0
 
     ``pocket_selection`` is derived from the WRITTEN file, not from the source topology:
     residue numbering in the pose is its own, and AutoPath's ``pocket_selection`` must
-    index the structure it is actually given.
+    index the structure it is actually given. AutoPath interprets the list as RESIDS,
+    so :func:`_assert_position_equals_resid` verifies that position and resid coincide
+    rather than trusting the coincidence.
 
     :param pose_ref: :class:`PoseRef` naming the source, frame and probe molecule.
     :param out_pdb: path to write; ``manifest.json`` is written beside it.
@@ -80,6 +107,7 @@ def write_pose(pose_ref, out_pdb, protein_selection="protein", pocket_cutoff=5.0
     resindex_to_position = {r.resindex: i + 1 for i, r in enumerate(written.residues)}
     pocket_selection = sorted(resindex_to_position[r.resindex]
                               for r in pocket.residues)
+    _assert_position_equals_resid(written, pocket_selection, out_pdb)
     pocket_resnames = [written.residues[i - 1].resname for i in pocket_selection]
 
     manifest = {

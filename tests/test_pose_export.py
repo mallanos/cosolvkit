@@ -128,6 +128,22 @@ def test_duplicate_resid_does_not_pull_in_a_second_probe(tmp_path):
     assert len(np.unique(probes.resids)) == 1
 
 
+def test_pocket_selection_refuses_a_pose_whose_resids_are_not_its_positions(tmp_path):
+    """AutoPath reads a pocket_selection list as RESIDS and maps them through
+    build_residue_mapping; write_pose computes 1-based POSITIONS. The two coincide for a
+    prmtop-derived pose only by accident, so a pose numbered otherwise must fail loudly
+    rather than silently restrain the wrong residues."""
+    from cosolvkit.analysis.sites.poses import write_pose
+
+    u = _universe_two_probes()
+    # Protein residue keeps position 1 in the written pose but carries resid 7.
+    u.residues.resids = [7, 279, 280]
+
+    with pytest.raises(ValueError, match="pocket_selection is ambiguous"):
+        write_pose(_pose_ref(), str(tmp_path / "pose.pdb"), pocket_cutoff=5.0,
+                   open_universe=lambda t, x: u)
+
+
 def test_manifest_is_written_beside_the_pose(tmp_path):
     from cosolvkit.analysis.sites.poses import write_pose
 
