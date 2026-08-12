@@ -608,9 +608,32 @@ class BindingSite:
     def member_hotspot_ids(self):
         return [h.site_id for h in self.member_hotspots]
 
-    def to_dict(self):
+    @property
+    def probe_occupancy(self):
+        """Every member hotspot's occupancy records, concatenated."""
+        return [occ for h in self.member_hotspots for occ in h.probe_occupancy]
+
+    @property
+    def n_probe_molecules(self):
+        return len(self.probe_occupancy)
+
+    @property
+    def total_residence_frames(self):
+        return sum(o.n_frames_bound for o in self.probe_occupancy)
+
+    def best_pose(self, gap_tolerance=0):
+        """The best bound frame across member hotspots, or None if none was occupied."""
+        poses = [h.best_pose(gap_tolerance) for h in self.member_hotspots]
+        poses = [p for p in poses if p is not None]
+        if not poses:
+            return None
+        return min(poses, key=lambda p: (-(p.episode[1] - p.episode[0]),
+                                         p.source_label, p.probe_resid))
+
+    def to_row(self):
         """Flat dict for CSV/JSON export (binding_sites.csv schema)."""
         cent = self.centroid if self.centroid is not None else (None, None, None)
+        pose = self.best_pose()
         d = {
             "site_id": self.site_id,
             "rank": self.rank,
@@ -644,9 +667,19 @@ class BindingSite:
             # accessible-volume mask was unavailable.
             "accessible_fraction": _round_or_none(self._mean_member_property(
                 "accessible_fraction"), 4),
+            "n_probe_molecules": self.n_probe_molecules,
+            "total_residence_frames": self.total_residence_frames,
+            "best_probe": (self.best_pose().probe_resname
+                           if self.best_pose() is not None else None),
         }
-        d.update(self.properties)
+        d.update({k: v for k, v in self.properties.items()
+                  if not isinstance(v, (list, dict))})
         return d
+
+    # Retained: binding_sites.csv writers and the dashboard consume the flat shape.
+    def to_dict(self):
+        """Alias of :meth:`to_row`."""
+        return self.to_row()
 
     def _mean_member_property(self, name):
         """Mean of *name* over member hotspots that carry it, or None if none do.
